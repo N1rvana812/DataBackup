@@ -2,7 +2,71 @@
 
 > 基于 Linux 终端的高效、安全、自动化数据备份工具
 
-## 快速开始
+
+## 项目开发须知
+
+>请大家按照以下规范开始建立自己的开发分支
+
+### 一、首次获取项目
+
+#### 拉取最新代码，进入工作目录并切换到develop
+
+```bash
+git clone https://github.com/N1rvana812/DataBackup.git
+cd DataBackup
+git checkout develop
+```
+
+### 二、创建自己的开发分支
+例如A同学：
+```bash
+git checkout -b feature/A
+git push -u origin feature/A
+```
+以后即可直接：
+```bash
+git push
+```
+- 吕涛:A
+- 吕书武:B
+- 倪申超:C
+
+### 三、开始开发
+
+#### 查看当前分支，确保是个人分支
+```bash
+git branch
+#输出如 * feature/A
+```
+### 四、提交代码
+#### 添加所有修改并提交
+```bash
+git commit -m "完成xx功能"
+```
+### 五、上传到远程仓库
+#### 第一次上传
+```bash
+git push -u origin feature/<自己的代号>
+```
+#### 后续可以直接push
+
+### 六、每日开发
+#### 记得每天同步一次
+```bash
+git checkout develop
+git pull origin develop
+git checkout feature/<个人代号>
+git merge develop
+
+# 如有冲突,解决冲突后
+git add .
+git commit
+```
+#### 完成功能后可以到github提交Pull Request
+#### 把个人分支申请合并到develop
+
+
+## 快速开始（目标软件的运行方式）
 
 ```bash
 # 编译
@@ -23,26 +87,6 @@ make
 # 实时备份（Daemon 模式）
 ./databackup watch -s /home/user/data -d /mnt/backup/ --daemon
 ```
-
-## 项目开发规范
-
->请大家按照以下规范开始建立自己的开发分支
->
-#### 1.拉取最新代码并切换到develop
-```bash
-git clone https://github.com/N1rvana812/DataBackup.git
-cd DataBackup
-git checkout develop
-```
-#### 2.在develop下建立个人分支开发并推送
-例如A同学：
-```bash
-git checkout -b feature/A
-git push -u origin feature/A
-```
-- 吕涛:A
-- 吕书武:B
-- 倪申超:C
 
 ## 项目结构说明
 
