@@ -24,6 +24,26 @@ make
 ./databackup watch -s /home/user/data -d /mnt/backup/ --daemon
 ```
 
+## 项目开发规范
+
+>请大家按照以下规范开始建立自己的开发分支
+>
+#### 1.拉取最新代码并切换到develop
+```bash
+git clone https://github.com/N1rvana812/DataBackup.git
+cd DataBackup
+git checkout develop
+```
+#### 2.在develop下建立个人分支开发并推送
+例如A同学：
+```bash
+git checkout -b feature/A
+git push -u origin feature/A
+```
+- 吕涛:A
+- 吕书武:B
+- 倪申超:C
+
 ## 项目结构说明
 
 ```bash
