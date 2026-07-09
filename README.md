@@ -1,0 +1,75 @@
+# DataBackup
+
+> 基于 Linux 终端的高效、安全、自动化数据备份工具
+
+## 快速开始
+
+```bash
+# 编译
+mkdir build && cd build
+cmake ..
+make
+
+# 运行
+./databackup --help
+
+# 基础备份
+./databackup backup -s /home/user/data -d /mnt/backup/data.dbak
+
+# 带压缩和加密的备份
+./databackup backup -s /home/user/data -d /mnt/backup/data.dbak \
+    --compress --encrypt --password "MySecretKey"
+
+# 实时备份（Daemon 模式）
+./databackup watch -s /home/user/data -d /mnt/backup/ --daemon
+```
+
+## 项目结构说明
+
+```bash
+DataBackup/
+├── CMakeLists.txt # CMake 构建配置文件
+├── docs/ # 项目文档
+├── include/ # 头文件（接口定义）
+├── src/ # 源代码（接口实现）
+├── tests/ # 单元测试
+└── third_party/ # 第三方依赖库
+```
+
+### 核心模块分工
+
+#### include/ 和 src/core/ - 核心引擎模块（负责人：吕涛）
+- **功能**：文件系统遍历、自定义规则过滤、基础读写、元数据提取与恢复
+- **关键接口**：
+  - `IFileReader.h`：流式文件读取接口
+  - `IFileWriter.h`：文件写入与元数据恢复接口
+- **技术要点**：C++17 `<filesystem>`、POSIX `stat/chmod/chown`
+
+#### include/ 和 src/pipeline/ - 数据管道模块（负责人：吕书武）
+- **功能**：自定义格式打包/解包、流式压缩/解压、对称加密/解密
+- **关键接口**：
+  - `IArchiveWriter.h`：归档写入接口（支持压缩+加密管道）
+  - `IArchiveReader.h`：归档读取接口（支持解密+解压管道）
+- **技术要点**：zlib deflate/inflate、OpenSSL AES-CTR、流式处理（4KB Chunk）
+
+#### include/ 和 src/monitor/ - 系统监控模块（负责人：倪申超）
+- **功能**：基于 inotify 的文件系统事件监听、Daemon 守护进程、增量备份触发
+- **关键接口**：
+  - `IMonitor.h`：监控器接口（支持 Daemon 化）
+  - `IFileEventListener.h`：事件回调接口（观察者模式）
+  - `FileEvent.h`：文件系统事件结构
+- **技术要点**：Linux inotify API、POSIX Daemon 化（fork/setsid）、防抖机制
+
+#### tests/ - 测试模块（负责人：倪申超）
+- **功能**：gtest 单元测试、Mock 对象、Valgrind 内存检测
+- **技术要点**：Google Test 框架、接口 Mock 测试
+
+#### docs/ - 文档目录
+- 需求分析说明书.docx
+- 系统设计文档.docx
+- 软件测试报告.docx
+- UML 用例图、类图、时序图
+
+#### third_party/ - 第三方依赖
+- CLI11：命令行参数解析库
+- nlohmann/json：JSON 配置文件解析
