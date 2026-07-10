@@ -57,7 +57,7 @@ git commit -m "<类型>(<影响范围>): <简短描述>"
 ### 五、上传到远程仓库
 #### 第一次上传
 ```bash
-git push -u origin feature/<自己的代号>
+git push -u origin feat/<功能>
 ```
 #### 后续可以直接push
 
