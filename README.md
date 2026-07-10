@@ -14,56 +14,80 @@
 ```bash
 git clone https://github.com/N1rvana812/DataBackup.git
 cd DataBackup
-git checkout develop
+git switch develop
 ```
 
-### 二、创建自己的开发分支
-例如A同学：
+### 二、创建所需功能的开发分支
+例如
 ```bash
-git checkout -b feature/A
-git push -u origin feature/A
+git switch -c feat/daemon
+git push -u origin feat/daemon
 ```
 以后即可直接：
 ```bash
 git push
 ```
-- 吕涛:A
-- 吕书武:B
-- 倪申超:C
+#### 分支名：<类型前缀>/<简短描述>
+- feat/ 开发功能
+- fix/ 修复bug
+- docs/ 修改文档
+- refactor/ 代码重构
+- test/ 添加或修改测试代码
+- chore/ 杂项修改
+
 
 ### 三、开始开发
 
-#### 查看当前分支，确保是个人分支
+#### 查看当前分支，确保是功能分支
 ```bash
 git branch
-#输出如 * feature/A
+#输出如 * feat/datapush
 ```
 ### 四、提交代码
 #### 添加所有修改并提交
+#### 采用Conventional commits
 ```bash
-git commit -m "完成xx功能"
+git commit -m "<类型>(<影响范围>): <简短描述>"
 ```
+例如：
+- feat(ui): 添加备份进度条组件
+- fix(core): 修复大文件备份时内存溢出的问题
+- docs(readme): 更新项目编译说明
+- refactor(compress): 重构ZIP压缩逻辑，降低耦合度
 ### 五、上传到远程仓库
 #### 第一次上传
 ```bash
-git push -u origin feature/<自己的代号>
+git push -u origin feat/<功能>
 ```
 #### 后续可以直接push
 
 ### 六、每日开发
-#### 记得每天同步一次
-```bash
-git checkout develop
-git pull origin develop
-git checkout feature/<个人代号>
-git merge develop
 
-# 如有冲突,解决冲突后
-git add .
-git commit
+1. 确保本地 main 是最新的
+```bash
+git switch main
+git pull origin main
 ```
-#### 完成功能后可以到github提交Pull Request
-#### 把个人分支申请合并到develop
+2. 切回自己的功能分支
+```bash
+git switch feature-compress
+```
+
+3. 把自己的分支 rebase 到最新的 main 上
+```bash
+git rebase main
+```
+如果提示冲突，打开代码编辑器解决冲突，然后 
+```bash
+git add . && git rebase --continue
+```
+
+4. 推送到远程 (因为 rebase 重写了历史，可能需要强制推送)
+```bash
+git push origin feature-compress -f 
+```
+
+5. 去 GitHub 上发起 Pull Request
 
 
 ## 快速开始（目标软件的运行方式）
