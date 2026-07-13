@@ -9,12 +9,12 @@
 
 ### 一、首次获取项目
 
-#### 拉取最新代码，进入工作目录并切换到develop
+#### 拉取最新代码，进入工作目录并切换到main
 
 ```bash
 git clone https://github.com/N1rvana812/DataBackup.git
 cd DataBackup
-git switch develop
+git switch main
 ```
 
 ### 二、创建所需功能的开发分支
