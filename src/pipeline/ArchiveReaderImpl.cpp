@@ -40,6 +40,12 @@ bool ArchiveReaderImpl::open(const std::string& archivePath, const BackupConfig&
         return false;
     }
 
+    // Validate archive version — v1 archives use zlib+AES, incompatible with v2 RLE+RC4
+    if (header.version != ARCHIVE_VERSION) {
+        close();
+        return false;
+    }
+
     // Parse flags
     compressionEnabled_ = (header.flags & FLAG_COMPRESSION) != 0;
     encryptionEnabled_ = (header.flags & FLAG_ENCRYPTION) != 0;
