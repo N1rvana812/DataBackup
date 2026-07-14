@@ -4,6 +4,7 @@
 #include "pipeline/ArchiveFormat.h"
 #include "pipeline/StreamCompressor.h"
 #include "pipeline/StreamEncryptor.h"
+#include "pipeline/StreamPacker.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -38,6 +39,12 @@ private:
     // Write regular file entry (header + chunked compressed+encrypted data)
     bool writeRegularFile(std::shared_ptr<IFileReader> reader);
 
+    // Write a packed file through StreamPacker then compress+encrypt+write
+    bool writePackedFile(std::shared_ptr<IFileReader> reader);
+
+    // Write a single chunk through compress → encrypt → write [len:4][data]
+    bool writeProcessedChunk(const uint8_t* data, size_t size);
+
     // Write the archive footer
     bool writeFooter();
 
@@ -48,8 +55,11 @@ private:
     BackupConfig config_;
     std::unique_ptr<StreamCompressor> compressor_;
     std::unique_ptr<StreamEncryptor> encryptor_;
+    std::unique_ptr<StreamPacker> packer_;
 
     std::vector<uint8_t> salt_;
+    uint64_t packedBlobOffset_ = 0;  // file offset of packed blob's FileEntryHeader
+    uint64_t packedDataSize_ = 0;    // accumulated raw packed bytes count
     std::vector<uint8_t> iv_;
     std::vector<uint8_t> derivedKey_;
 

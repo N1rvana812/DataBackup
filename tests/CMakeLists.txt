@@ -31,6 +31,7 @@ set(TEST_SOURCES
     test_stream_compressor.cpp
     test_stream_encryptor.cpp
     test_key_derivation.cpp
+    test_stream_packer.cpp
 )
 
 # ============================================================================

@@ -21,6 +21,7 @@ void printUsage(const char* progName) {
               << "  -s, --source <path>     Source directory to backup\n"
               << "  -d, --dest <path>       Destination archive file (.dbak)\n"
               << "  --compress              Enable RLE compression\n"
+              << "  --pack                  Enable multi-file packing\n"
               << "  --encrypt               Enable RC4 stream encryption\n"
               << "  --password <pwd>        Encryption password\n"
               << "  --level <1-9>           Compression level (default: 6)\n\n"
@@ -49,6 +50,7 @@ struct CliArgs {
     std::string dest;
     bool compress = false;
     bool encrypt = false;
+    bool pack = false;
     std::string password;
     int compressionLevel = 6;
 };
@@ -83,6 +85,8 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
             args.compress = true;
         } else if (arg == "--encrypt") {
             args.encrypt = true;
+        } else if (arg == "--pack") {
+            args.pack = true;
         } else if (arg == "--password") {
             if (++i >= argc) {
                 std::cerr << "[ERROR] Missing value for " << arg << '\n';
@@ -128,6 +132,7 @@ backup::BackupConfig buildConfig(const CliArgs& args) {
     backup::BackupConfig config;
     config.enableCompression = args.compress;
     config.enableEncryption = args.encrypt;
+    config.enablePacking = args.pack;
     config.password = args.password;
     config.compressionLevel = args.compressionLevel;
     return config;
@@ -151,6 +156,7 @@ int runBackup(const CliArgs& args) {
               << "  Source:      " << sourceRoot << '\n'
               << "  Destination: " << archivePath << '\n'
               << "  Compression: " << (config.enableCompression ? "yes" : "no") << '\n'
+              << "  Packing:     " << (config.enablePacking ? "yes" : "no") << '\n'
               << "  Encryption:  " << (config.enableEncryption ? "yes (RC4 stream cipher)" : "no") << '\n';
 
     if (config.enableCompression) {

@@ -22,6 +22,7 @@ struct FileMetaData {
 struct BackupConfig {
     bool enableCompression = false;
     bool enableEncryption = false;
+    bool enablePacking = false;
     std::string password;     // 加密密码
     int compressionLevel = 6; // 压缩级别 (1-9)
 };

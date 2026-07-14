@@ -17,7 +17,7 @@ namespace backup {
 constexpr const char ARCHIVE_MAGIC[] = "DBAK";
 constexpr const char ARCHIVE_FOOTER_MAGIC[] = "KABD";
 constexpr size_t MAGIC_SIZE = 4;
-constexpr uint16_t ARCHIVE_VERSION = 2;   // bumped: v1=zlib+AES, v2=RLE+RC4+manualKDF
+constexpr uint16_t ARCHIVE_VERSION = 3;   // bumped: v2=RLE+RC4+manualKDF, v3=adds packer
 constexpr size_t SALT_SIZE = 16;          // random salt for key derivation
 constexpr size_t IV_SIZE = 16;            // random IV for stream cipher init
 constexpr size_t AES_KEY_SIZE = 32;       // derived key size (kept for compat)
@@ -27,6 +27,7 @@ constexpr size_t CHUNK_SIZE = 4096;    // 4KB streaming chunk
 enum ArchiveFlags : uint16_t {
     FLAG_COMPRESSION = 0x01,
     FLAG_ENCRYPTION  = 0x02,
+    FLAG_PACK        = 0x04,
 };
 
 // ============================================================================
@@ -102,6 +103,9 @@ inline void initGlobalHeader(ArchiveGlobalHeader& header,
     }
     if (config.enableEncryption) {
         header.flags |= FLAG_ENCRYPTION;
+    }
+    if (config.enablePacking) {
+        header.flags |= FLAG_PACK;
     }
     std::memcpy(header.salt, salt.data(), SALT_SIZE);
     std::memcpy(header.iv, iv.data(), IV_SIZE);

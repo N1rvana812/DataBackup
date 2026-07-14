@@ -40,7 +40,7 @@ bool ArchiveReaderImpl::open(const std::string& archivePath, const BackupConfig&
         return false;
     }
 
-    // Validate archive version — v1 archives use zlib+AES, incompatible with v2 RLE+RC4
+    // Validate archive version — v1/v2 use incompatible formats
     if (header.version != ARCHIVE_VERSION) {
         close();
         return false;
@@ -49,6 +49,7 @@ bool ArchiveReaderImpl::open(const std::string& archivePath, const BackupConfig&
     // Parse flags
     compressionEnabled_ = (header.flags & FLAG_COMPRESSION) != 0;
     encryptionEnabled_ = (header.flags & FLAG_ENCRYPTION) != 0;
+    packingEnabled_ = (header.flags & FLAG_PACK) != 0;
 
     totalFileCount_ = 0;
 
@@ -85,6 +86,10 @@ bool ArchiveReaderImpl::open(const std::string& archivePath, const BackupConfig&
             static_cast<int>(header.compressionLevel));
     }
 
+    if (packingEnabled_) {
+        packer_ = std::make_unique<StreamPacker>();
+    }
+
     // Reset file reading state
     filesRead_ = 0;
     hasCurrentFile_ = false;
@@ -94,6 +99,28 @@ bool ArchiveReaderImpl::open(const std::string& archivePath, const BackupConfig&
 
 bool ArchiveReaderImpl::getNextFileMeta(FileMetaData& meta) {
     if (file_ == nullptr) {
+        return false;
+    }
+
+    // Packed mode: file iteration is driven by the packer
+    if (packingEnabled_ && packer_) {
+        while (!packer_->isFinished()) {
+            if (packer_->tryReadFileMeta(meta)) {
+                currentMeta_ = meta;
+                hasCurrentFile_ = true;
+                currentFileRemaining_ = meta.isDirectory ? 0 : meta.fileSize;
+                internalBuffer_.clear();
+                internalBufferOffset_ = 0;
+                ++filesRead_;
+                return true;
+            }
+
+            // Need more data — read next chunk from disk
+            if (!fillInternalBuffer()) {
+                // No more chunks — packer is exhausted
+                return false;
+            }
+        }
         return false;
     }
 
@@ -163,6 +190,32 @@ ssize_t ArchiveReaderImpl::readChunk(uint8_t* buffer, size_t size) {
         internalBuffer_.clear();
         internalBufferOffset_ = 0;
         return 0;
+    }
+
+    // Packed mode: delegate to packer for data extraction
+    if (packingEnabled_ && packer_) {
+        size_t totalCopied = 0;
+
+        while (totalCopied < size && currentFileRemaining_ > 0) {
+            ssize_t result = packer_->readFileData(buffer + totalCopied,
+                                                   size - totalCopied);
+            if (result > 0) {
+                totalCopied += static_cast<size_t>(result);
+                currentFileRemaining_ -= static_cast<uint64_t>(result);
+                continue;
+            }
+
+            if (result < 0) {
+                return -1;  // Error
+            }
+
+            // result == 0 — packer buffer empty, try to fill
+            if (!fillInternalBuffer()) {
+                break;
+            }
+        }
+
+        return static_cast<ssize_t>(totalCopied);
     }
 
     size_t totalCopied = 0;
@@ -257,6 +310,14 @@ bool ArchiveReaderImpl::fillInternalBuffer() {
     }
 
     internalBufferOffset_ = 0;
+
+    // In packed mode, feed the decompressed data to the packer
+    if (packingEnabled_ && packer_) {
+        packer_->feedData(internalBuffer_.data(), internalBuffer_.size());
+        internalBuffer_.clear();
+        return true;  // Data was consumed by the packer
+    }
+
     return !internalBuffer_.empty();
 }
 
@@ -265,6 +326,7 @@ void ArchiveReaderImpl::cleanup() {
 
     decryptor_.reset();
     decompressor_.reset();
+    packer_.reset();
 
     // Securely clear decrypted plaintext buffer before freeing
     KeyDerivation::secureClear(internalBuffer_);

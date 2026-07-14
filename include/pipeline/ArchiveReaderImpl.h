@@ -4,6 +4,7 @@
 #include "pipeline/ArchiveFormat.h"
 #include "pipeline/StreamCompressor.h"
 #include "pipeline/StreamEncryptor.h"
+#include "pipeline/StreamPacker.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -46,9 +47,11 @@ private:
     // Archive config parsed from header
     bool compressionEnabled_ = false;
     bool encryptionEnabled_ = false;
+    bool packingEnabled_ = false;
 
     std::unique_ptr<StreamCompressor> decompressor_;
     std::unique_ptr<StreamEncryptor> decryptor_;
+    std::unique_ptr<StreamPacker> packer_;
 
     std::vector<uint8_t> salt_;
     std::vector<uint8_t> iv_;

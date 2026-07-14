@@ -51,6 +51,11 @@ bool ArchiveWriterImpl::init(const std::string& archivePath, const BackupConfig&
             compressor_ = std::make_unique<StreamCompressor>(config_.compressionLevel);
         }
 
+        // Create packer if packing is enabled
+        if (config_.enablePacking) {
+            packer_ = std::make_unique<StreamPacker>();
+        }
+
         // Write the global header
         ArchiveGlobalHeader header {};
         ArchiveFormat::initGlobalHeader(header, config_, salt_, iv_);
@@ -60,8 +65,20 @@ bool ArchiveWriterImpl::init(const std::string& archivePath, const BackupConfig&
             return false;
         }
 
-        // Record the index offset (right after the global header)
-        indexOffset_ = sizeof(ArchiveGlobalHeader);
+        // If packing, write a placeholder FileEntryHeader for the packed blob
+        // (patched in finalize() once we know the total size)
+        if (config_.enablePacking) {
+            packedBlobOffset_ = static_cast<uint64_t>(std::ftell(file_));
+            FileEntryHeader placeholder{};
+            std::memset(&placeholder, 0, sizeof(placeholder));
+            placeholder.pathLength = 8;  // ".packed"
+            if (!writeRaw(&placeholder, sizeof(placeholder))) { cleanup(); return false; }
+            if (!writeRaw(".packed", 8)) { cleanup(); return false; }
+            indexOffset_ = packedBlobOffset_;
+        } else {
+            // Record the index offset (right after the global header)
+            indexOffset_ = sizeof(ArchiveGlobalHeader);
+        }
 
         return true;
     } catch (const std::exception&) {
@@ -76,6 +93,10 @@ bool ArchiveWriterImpl::addFile(std::shared_ptr<IFileReader> reader) {
     }
 
     const FileMetaData meta = reader->getMetaData();
+
+    if (config_.enablePacking) {
+        return writePackedFile(std::move(reader));
+    }
 
     if (!writeFileHeader(meta)) {
         return false;
@@ -95,9 +116,115 @@ bool ArchiveWriterImpl::addFile(std::shared_ptr<IFileReader> reader) {
     return true;
 }
 
+bool ArchiveWriterImpl::writePackedFile(std::shared_ptr<IFileReader> reader) {
+    const FileMetaData meta = reader->getMetaData();
+
+    // Pack and write file header
+    auto headerBytes = packer_->packHeader(meta);
+    if (!writeProcessedChunk(headerBytes.data(), headerBytes.size())) {
+        return false;
+    }
+    packedDataSize_ += headerBytes.size();
+
+    if (meta.isDirectory) {
+        ++fileCount_;
+        return true;
+    }
+
+    // Pack and write file data
+    std::vector<uint8_t> inputBuffer(CHUNK_SIZE);
+    while (true) {
+        const ssize_t bytesRead = reader->readChunk(inputBuffer.data(), inputBuffer.size());
+        if (bytesRead < 0) {
+            return false;
+        }
+        if (bytesRead == 0) {
+            break;
+        }
+
+        auto dataBytes = packer_->packData(inputBuffer.data(), static_cast<size_t>(bytesRead));
+        if (!writeProcessedChunk(dataBytes.data(), dataBytes.size())) {
+            return false;
+        }
+        packedDataSize_ += dataBytes.size();
+    }
+
+    ++fileCount_;
+    return true;
+}
+
+bool ArchiveWriterImpl::writeProcessedChunk(const uint8_t* data, size_t size) {
+    if (data == nullptr || size == 0) {
+        return true;
+    }
+
+    const uint8_t* dataPtr = data;
+    size_t dataSize = size;
+
+    // Compress
+    std::vector<uint8_t> compressedData;
+    if (compressor_) {
+        try {
+            compressedData = compressor_->compress(dataPtr, dataSize);
+            dataPtr = compressedData.data();
+            dataSize = compressedData.size();
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    // Encrypt
+    std::vector<uint8_t> encryptedData;
+    if (encryptor_) {
+        try {
+            encryptedData = encryptor_->encrypt(dataPtr, dataSize);
+            dataPtr = encryptedData.data();
+            dataSize = encryptedData.size();
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    // Write chunk length + chunk data
+    const uint32_t chunkLen = static_cast<uint32_t>(dataSize);
+    return writeRaw(&chunkLen, sizeof(chunkLen)) &&
+           (dataSize == 0 || writeRaw(dataPtr, dataSize));
+}
+
 bool ArchiveWriterImpl::finalize() {
     if (file_ == nullptr) {
         return false;
+    }
+
+    if (config_.enablePacking) {
+        // Finalize the packer
+        auto endBytes = packer_->endPack();
+        if (!endBytes.empty()) {
+            writeProcessedChunk(endBytes.data(), endBytes.size());
+        }
+
+        // Write EOF marker for the packed blob entry
+        const uint32_t zeroChunkLen = 0;
+        if (!writeRaw(&zeroChunkLen, sizeof(zeroChunkLen))) {
+            cleanup();
+            return false;
+        }
+
+        // Patch the placeholder FileEntryHeader with the correct size
+        FileEntryHeader blobHeader{};
+        FileMetaData blobMeta{};
+        blobMeta.relativePath = ".packed";
+        blobMeta.fileSize = packedDataSize_;
+        ArchiveFormat::metaDataToFileEntryHeader(blobMeta, blobHeader);
+
+        const long currentPos = std::ftell(file_);
+        std::fseek(file_, static_cast<long>(packedBlobOffset_), SEEK_SET);
+        writeRaw(&blobHeader, sizeof(blobHeader));
+        writeRaw(".packed", blobHeader.pathLength);
+        std::fseek(file_, currentPos, SEEK_SET);
+
+        // Footer should record 1 file entry (the packed blob)
+        fileCount_ = 1;
     }
 
     bool success = writeFooter();
@@ -216,6 +343,7 @@ void ArchiveWriterImpl::cleanup() {
     KeyDerivation::secureClear(derivedKey_);
     encryptor_.reset();
     compressor_.reset();
+    packer_.reset();
 
     if (file_ != nullptr) {
         std::fclose(file_);
