@@ -76,10 +76,12 @@ bool StreamPacker::tryReadFileMeta(FileMetaData& meta) {
     FileEntryHeader entryHeader{};
     std::memcpy(&entryHeader, buffer_.data() + bufferOffset_, sizeof(FileEntryHeader));
 
-    // Validate pathLength
+    // Validate pathLength — must be 1..4096
     if (entryHeader.pathLength == 0 || entryHeader.pathLength > 4096) {
-        // No more valid entries — we've reached the end of the packed stream
-        finished_ = true;
+        // Invalid header encountered — this is a corrupted entry, not end-of-stream.
+        // Skip past it to avoid blocking subsequent valid entries.
+        // Advance past the entire FileEntryHeader so the caller can try again.
+        bufferOffset_ += sizeof(FileEntryHeader);
         return false;
     }
 
@@ -157,11 +159,6 @@ ssize_t StreamPacker::readFileData(uint8_t* buffer, size_t size) {
 
 bool StreamPacker::isFinished() const {
     return finished_;
-}
-
-bool StreamPacker::isCurrentFileComplete() const {
-    return hasCurrentFile_ &&
-           currentFileBytesConsumed_ >= currentMeta_.fileSize;
 }
 
 void StreamPacker::reset() {

@@ -80,9 +80,6 @@ public:
     // Check if all files have been extracted from the packed stream.
     bool isFinished() const;
 
-    // Returns true if the current file has been fully consumed.
-    bool isCurrentFileComplete() const;
-
     // Reset all internal state (both pack and unpack sides).
     void reset();
 

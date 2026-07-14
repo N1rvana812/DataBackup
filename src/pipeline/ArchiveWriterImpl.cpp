@@ -68,7 +68,12 @@ bool ArchiveWriterImpl::init(const std::string& archivePath, const BackupConfig&
         // If packing, write a placeholder FileEntryHeader for the packed blob
         // (patched in finalize() once we know the total size)
         if (config_.enablePacking) {
-            packedBlobOffset_ = static_cast<uint64_t>(std::ftell(file_));
+            const long headerOffset = std::ftell(file_);
+            if (headerOffset < 0) {
+                cleanup();
+                return false;
+            }
+            packedBlobOffset_ = static_cast<uint64_t>(headerOffset);
             FileEntryHeader placeholder{};
             std::memset(&placeholder, 0, sizeof(placeholder));
             const std::string blobPath = ".packed";
@@ -219,13 +224,17 @@ bool ArchiveWriterImpl::finalize() {
         ArchiveFormat::metaDataToFileEntryHeader(blobMeta, blobHeader);
 
         const long currentPos = std::ftell(file_);
-        std::fseek(file_, static_cast<long>(packedBlobOffset_), SEEK_SET);
-        writeRaw(&blobHeader, sizeof(blobHeader));
-        writeRaw(".packed", blobHeader.pathLength);
-        std::fseek(file_, currentPos, SEEK_SET);
+        if (currentPos < 0 ||
+            std::fseek(file_, static_cast<long>(packedBlobOffset_), SEEK_SET) != 0 ||
+            !writeRaw(&blobHeader, sizeof(blobHeader)) ||
+            !writeRaw(".packed", blobHeader.pathLength) ||
+            std::fseek(file_, currentPos, SEEK_SET) != 0) {
+            cleanup();
+            return false;
+        }
 
-        // Footer should record 1 file entry (the packed blob)
-        fileCount_ = 1;
+        // Footer should record actual packed file count, not the blob count
+        // (fileCount_ tracks individual source files packed inside the blob)
     }
 
     bool success = writeFooter();

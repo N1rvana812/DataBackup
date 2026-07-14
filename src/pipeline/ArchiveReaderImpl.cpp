@@ -97,12 +97,15 @@ bool ArchiveReaderImpl::open(const std::string& archivePath, const BackupConfig&
             close();
             return false;
         }
-        if (blobHeader.pathLength > 0) {
-            std::vector<uint8_t> pathBuf(blobHeader.pathLength);
-            if (!readRaw(pathBuf.data(), blobHeader.pathLength)) {
-                close();
-                return false;
-            }
+        // Validate pathLength — must match ".packed" (7 bytes)
+        if (blobHeader.pathLength == 0 || blobHeader.pathLength > 4096) {
+            close();
+            return false;
+        }
+        std::vector<uint8_t> pathBuf(blobHeader.pathLength);
+        if (!readRaw(pathBuf.data(), blobHeader.pathLength)) {
+            close();
+            return false;
         }
     }
 
