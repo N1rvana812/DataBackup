@@ -260,6 +260,8 @@ void ArchiveReaderImpl::cleanup() {
     decryptor_.reset();
     decompressor_.reset();
 
+    // Securely clear decrypted plaintext buffer before freeing
+    KeyDerivation::secureClear(internalBuffer_);
     internalBuffer_.clear();
     internalBufferOffset_ = 0;
 

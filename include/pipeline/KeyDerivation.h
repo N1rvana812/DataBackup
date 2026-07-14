@@ -28,11 +28,11 @@ namespace backup {
 
 class KeyDerivation {
 public:
-    // Derive an AES-256 key from a password and salt using PBKDF2-HMAC-SHA256.
+    // Derive a cryptographic key from a password and salt using iterative mixing.
     // @param password   The user-provided password
     // @param salt       16-byte random salt
-    // @param keySize    Output key size in bytes (default 32 for AES-256)
-    // @param iterations Number of PBKDF2 iterations (default 100000)
+    // @param keySize    Output key size in bytes (default 32)
+    // @param iterations Number of mixing iterations (default 100000)
     // @return           Derived key bytes (keySize bytes)
     static std::vector<uint8_t> deriveKey(const std::string& password,
                                            const uint8_t* salt,

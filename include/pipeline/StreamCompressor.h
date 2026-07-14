@@ -7,18 +7,18 @@
 namespace backup {
 
 // ============================================================================
-// Streaming Zlib Compressor / Decompressor
+// Streaming RLE Compressor / Decompressor
 // ============================================================================
 //
-// Each 4KB chunk is independently compressed. This trades some compression
-// ratio for true streaming (no need to hold the entire file in memory).
-// The per-chunk approach also allows the reader to seek and decompress
-// individual chunks without processing the entire file.
+// Each 4KB chunk is independently compressed using PackBits-style RLE.
+// This trades some compression ratio for true streaming (no need to hold
+// the entire file in memory). The per-chunk approach also allows the reader
+// to seek and decompress individual chunks without processing the entire file.
 // ============================================================================
 
 class StreamCompressor {
 public:
-    // @param level  Compression level 1-9 (6 = default trade-off)
+    // @param level  Compression level 1-9 (kept for API compatibility; RLE ignores level)
     explicit StreamCompressor(int level = 6);
     ~StreamCompressor();
 

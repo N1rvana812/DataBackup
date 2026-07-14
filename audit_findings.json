@@ -1,0 +1,92 @@
+[
+  {
+    "file": "src/pipeline/KeyDerivation.cpp",
+    "line": 34,
+    "summary": "reinterpret_cast from uint8_t* to uint32_t* violates strict aliasing — undefined behavior",
+    "failure_scenario": "The state array `uint8_t state[64]` is stack-allocated with no alignment guarantee. Casting to `uint32_t*` and dereferencing is undefined behavior per the C++ standard. Works on x86 due to unaligned access support, but may trap on ARM or when compiled with aggressive LTO optimizations that assume non-aliasing pointers. The old code used OpenSSL functions internally, which handle alignment correctly."
+  },
+  {
+    "file": "src/pipeline/KeyDerivation.cpp",
+    "line": 32,
+    "summary": "Custom mixing function replaces NIST-standard PBKDF2-HMAC-SHA256 without cryptographic review — potential security regression",
+    "failure_scenario": "The old code used PKCS5_PBKDF2_HMAC with HMAC-SHA256, a well-studied KDF with proven security bounds. The new KDF uses ad-hoc 32-bit arithmetic (add/xor/rotate) in an 8-round mixing function. The password and salt are only used during initState (line 59-63) — subsequent iterations mix only the state without reincorporating the password, making the construction weaker than PBKDF2 where the password is HMAC key in every round. The iteration folding (line 104-107) only affects 4 of 64 state bytes every 100 iterations, providing minimal key separation. No public cryptanalysis exists for this construction."
+  },
+  {
+    "file": "src/pipeline/StreamCompressor.cpp",
+    "line": 50,
+    "summary": "Decompression has no generic corrupt-data detection — RLE only detects truncation, not semantic corruption",
+    "failure_scenario": "Old code detected Z_DATA_ERROR, Z_MEM_ERROR, Z_NEED_DICT from zlib inflate. The RLE decompressor only checks two bounds conditions (truncated control byte at line 116, truncated literal block at line 128). Any non-truncated byte sequence decodes successfully because every 8-bit value is a valid control byte. Corrupted or deliberately malformed RLE data that is not truncated will decode without error, potentially producing garbage output without notification to the caller."
+  },
+  {
+    "file": "src/pipeline/StreamCompressor.cpp",
+    "line": 51,
+    "summary": "Compression level parameter (1-9) is accepted but has no effect on RLE output — behavioral regression for callers expecting different tradeoffs",
+    "failure_scenario": "Old zlib implementation produced different output tradeoffs at levels 1 (fast) vs 9 (best compression). The RLE algorithm uses a hardcoded run threshold of 3 at line 74 regardless of level. The constructor clamps the level (line 51) but never uses it. The test `CompressionLevelProducesSameResult` acknowledges this: level 1 and level 9 produce identical output. Callers relying on level-based behavior (e.g., setting level 1 for speed) get no benefit."
+  },
+  {
+    "file": "src/pipeline/StreamCompressor.cpp",
+    "line": 58,
+    "summary": "Backward compatibility broken — archives written with old zlib deflate format cannot be read by new RLE code",
+    "failure_scenario": "Old code produced raw zlib deflate streams per chunk. New code produces RLE-encoded chunks with an incompatible byte format. Any archive created by a build prior to commit d3a6d8c is unreadable after the refactor. No format detection, migration path, or fallback mechanism exists. The ArchiveFormat.h constants and header structure remain unchanged, so a 'DBAK' archive with FLAG_COMPRESSION set will be fed to the RLE decompressor regardless of which compressor wrote it."
+  },
+  {
+    "file": "include/pipeline/StreamCompressor.h",
+    "line": 31,
+    "summary": "Header comments still reference zlib deflateInit/deflate/deflateEnd terminology — misleading for maintainers",
+    "failure_scenario": "Lines 31 and 39 of StreamCompressor.h contain comments indicating per-call deflateInit/inflateEnd lifecycle, but the implementation is now RLE with no such lifecycle. Maintainers reading the header alone would assume zlib dependency still exists."
+  },
+  {
+    "file": "include/pipeline/KeyDerivation.h",
+    "line": 31,
+    "summary": "Header comment still references PBKDF2-HMAC-SHA256 — misleading for API consumers",
+    "failure_scenario": "Line 31 documents 'Derive an AES-256 key from a password and salt using PBKDF2-HMAC-SHA256', but the implementation is a custom KDF with unknown cryptographic properties. The @param iterations comment on line 35 also references PBKDF2."
+  },
+  {
+    "file": "include/pipeline/ArchiveFormat.h",
+    "line": 21,
+    "summary": "ArchiveFormat.h comments still reference PBKDF2 salt and AES-256 — misleading references to removed crypto",
+    "failure_scenario": "Comments on lines 21, 23, 41 reference PBKDF2 and AES-256, but the implementation now uses a custom KDF and RC4. While the constant names (SALT_SIZE, AES_KEY_SIZE) are just identifiers, the comments create confusion about the actual cryptographic algorithm."
+  },
+  {
+    "file": "tests/test_stream_encryptor.cpp",
+    "line": 3,
+    "summary": "Test file doc comment still references AES-256-CTR — misleading for developers running tests",
+    "failure_scenario": "The @brief line reads 'unit tests for StreamEncryptor (AES-256-CTR)' but the implementation is RC4. Line 74 also says '16-byte key is invalid for AES-256'."
+  },
+  {
+    "file": "tests/test_key_derivation.cpp",
+    "line": 5,
+    "summary": "Test file doc comment still references PBKDF2 — misleading",
+    "failure_scenario": "The @brief line reads 'Tests PBKDF2 key derivation' but the implementation is a custom KDF."
+  },
+  {
+    "file": "tests/test_stream_compressor.cpp",
+    "line": 103,
+    "summary": "No test coverage for RLE-specific error conditions (truncated data, corrupted blocks)",
+    "failure_scenario": "StreamCompressor::decompress has two explicit error paths at lines 117 and 129 ('truncated RLE data', 'truncated literal block'), but no test exercises them. A malformed RLE archive would silently fail without test coverage to verify error handling behavior. Additionally, no test verifies that non-truncated but semantically corrupted RLE data produces a detectable error."
+  },
+  {
+    "file": "src/pipeline/StreamEncryptor.cpp",
+    "line": 97,
+    "summary": "init() may throw std::bad_alloc via vector allocation instead of returning false — inconsistent error handling pattern",
+    "failure_scenario": "Old code returned false when EVP_CIPHER_CTX_new() returned nullptr (heap allocation failure). New code's std::vector<uint8_t> combined() at line 97 could throw std::bad_alloc on allocation failure, which propagates as an exception instead of returning false. Callers in ArchiveWriterImpl/ArchiveReaderImpl wrap init() in try/catch, so the exception is caught, but this creates an inconsistency where other init() failures return false."
+  },
+  {
+    "file": "src/pipeline/KeyDerivation.cpp",
+    "line": 59,
+    "summary": "Password and salt only injected during state initialization, not during mixing rounds — weaker than PBKDF2's per-round HMAC keying",
+    "failure_scenario": "initState XORs password and salt into the initial 64-byte state (lines 59-63). Subsequent mixState rounds (lines 37-48) operate only on the state without reincorporating password or salt. After enough mixing rounds, the initial password/salt contribution is diluted, potentially enabling collisions or preimage attacks. PBKDF2 uses the password as an HMAC key in every round, maintaining full cryptographic dependency on the password throughout."
+  },
+  {
+    "file": "src/pipeline/KeyDerivation.cpp",
+    "line": 104,
+    "summary": "Iteration counter folding into state is weak — only affects 4 of 64 bytes every 100 iterations",
+    "failure_scenario": "Line 104 folds the iteration number into only 4 bytes (state[0..3]) every 100 iterations. This provides minimal key separation between iterations: different iteration counts produce state differences only in these 4 bytes for 99 out of every 100 steps. In PBKDF2, the entire iteration count affects every HMAC call through the salt/block counter, providing full key separation."
+  },
+  {
+    "file": "src/pipeline/StreamEncryptor.cpp",
+    "line": 133,
+    "summary": "Output buffer sizing for RC4 is correct (stream cipher produces size output bytes) — but no explicit verification that old EVP design margin is unnecessary",
+    "failure_scenario": "Old code allocated `size + EVP_CIPHER_CTX_block_size(context)` and then resized to `outLen`. For AES-256-CTR, block_size returns 1 (stream mode), so output = size bytes after resize. New code allocates `output(size)` which is correct for RC4. No issue — this finding confirms correctness."
+  }
+]

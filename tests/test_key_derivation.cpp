@@ -2,7 +2,7 @@
  * @file test_key_derivation.cpp
  * @brief Google Test unit tests for KeyDerivation
  *
- * Tests PBKDF2 key derivation, random byte generation, and secure buffer
+ * Tests iterative key derivation, random byte generation, and secure buffer
  * clearing.
  */
 

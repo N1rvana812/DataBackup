@@ -28,10 +28,9 @@ inline uint32_t rotl32(uint32_t x, int n) {
 }
 
 // Mix the 64-byte state using a simple round function
-// The state is treated as 16 uint32_t values
-void mixState(uint8_t* state, size_t /*stateSize*/) {
-    // Treat state as an array of uint32_t (stateSize must be 64 = 16 * 4)
-    uint32_t* s = reinterpret_cast<uint32_t*>(state);
+// The state is treated as 16 uint32_t values — uses uint32_t* directly
+// (state is declared as uint32_t[16] in deriveKey, avoiding strict-aliasing UB)
+void mixState(uint32_t* s, size_t /*stateSize*/) {
     constexpr int N = 16;  // 64 bytes / 4 bytes per uint32_t
 
     for (int round = 0; round < 8; ++round) {
@@ -49,17 +48,19 @@ void mixState(uint8_t* state, size_t /*stateSize*/) {
 }
 
 // Initialize the 64-byte state from password bytes, salt, and iteration counter
-void initState(uint8_t* state, size_t stateSize,
+// state is uint32_t[16], accessed as uint8_t[64] via cast (legal: uint8_t* may alias anything)
+void initState(uint32_t* state, size_t stateSize,
                const uint8_t* password, size_t passwordLen,
                const uint8_t* salt, size_t saltLen,
                unsigned int iteration) {
-    std::memset(state, 0, stateSize);
+    uint8_t* raw = reinterpret_cast<uint8_t*>(state);
+    std::memset(raw, 0, stateSize);
 
     // Fill state with password, salt, and iteration counter interleaved
     for (size_t i = 0; i < stateSize; ++i) {
-        state[i] ^= password[i % passwordLen];
-        state[i] ^= salt[i % saltLen];
-        state[i] ^= static_cast<uint8_t>((iteration >> ((i % 4) * 8)) & 0xFF);
+        raw[i] ^= password[i % passwordLen];
+        raw[i] ^= salt[i % saltLen];
+        raw[i] ^= static_cast<uint8_t>((iteration >> ((i % 4) * 8)) & 0xFF);
     }
 }
 
@@ -83,9 +84,10 @@ std::vector<uint8_t> KeyDerivation::deriveKey(const std::string& password,
     const auto* passwordBytes = reinterpret_cast<const uint8_t*>(password.data());
     const size_t passwordLen = password.size();
 
-    // 64-byte internal state
+    // 64-byte internal state, aligned for uint32_t access (avoids strict-aliasing UB)
     constexpr size_t STATE_SIZE = 64;
-    uint8_t state[STATE_SIZE];
+    constexpr size_t STATE_WORDS = STATE_SIZE / sizeof(uint32_t);
+    alignas(uint32_t) uint32_t state[STATE_WORDS];
 
     std::vector<uint8_t> key(keySize);
     size_t generated = 0;
@@ -101,18 +103,25 @@ std::vector<uint8_t> KeyDerivation::deriveKey(const std::string& password,
         for (unsigned int i = 0; i < iterations; ++i) {
             // Fold the iteration number into the state periodically
             if (i % 100 == 0) {
+                uint8_t* raw = reinterpret_cast<uint8_t*>(state);
                 for (int j = 0; j < 4; ++j) {
-                    state[j] ^= static_cast<uint8_t>((i >> (j * 8)) & 0xFF);
+                    raw[j] ^= static_cast<uint8_t>((i >> (j * 8)) & 0xFF);
                 }
             }
             mixState(state, STATE_SIZE);
         }
 
-        // Extract bytes from the state
+        // Extract bytes from the state (uint8_t* cast is legal — char types may alias anything)
         const size_t toCopy = std::min(STATE_SIZE, keySize - generated);
         std::memcpy(key.data() + generated, state, toCopy);
         generated += toCopy;
         ++iterCounter;
+    }
+
+    // Securely clear the stack state before returning
+    volatile uint32_t* vState = state;
+    for (size_t i = 0; i < STATE_WORDS; ++i) {
+        vState[i] = 0;
     }
 
     return key;

@@ -9,10 +9,7 @@ namespace backup {
 ArchiveWriterImpl::ArchiveWriterImpl() = default;
 
 ArchiveWriterImpl::~ArchiveWriterImpl() {
-    if (file_ != nullptr) {
-        std::fclose(file_);
-        file_ = nullptr;
-    }
+    cleanup();
 }
 
 bool ArchiveWriterImpl::init(const std::string& archivePath, const BackupConfig& config) {
@@ -103,19 +100,13 @@ bool ArchiveWriterImpl::finalize() {
         return false;
     }
 
-    if (!writeFooter()) {
-        return false;
-    }
+    bool success = writeFooter();
 
-    // Securely clear sensitive data from memory
-    KeyDerivation::secureClear(derivedKey_);
-    encryptor_.reset();
-    compressor_.reset();
+    // Delegate to cleanup() in all cases — ensures secure clear and resource
+    // release regardless of success or failure
+    cleanup();
 
-    std::fclose(file_);
-    file_ = nullptr;
-
-    return true;
+    return success;
 }
 
 bool ArchiveWriterImpl::writeRaw(const void* data, size_t size) {

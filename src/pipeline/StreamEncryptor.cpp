@@ -1,4 +1,5 @@
 #include "pipeline/StreamEncryptor.h"
+#include "pipeline/KeyDerivation.h"
 
 #include <algorithm>
 #include <cstring>
@@ -34,20 +35,25 @@ inline void swap(uint8_t& a, uint8_t& b) {
     b = t;
 }
 
+// Securely clear an RC4 S-box using volatile to prevent compiler elision
+inline void secureClearSBox(uint8_t (&sbox)[256], uint8_t& i, uint8_t& j) {
+    volatile uint8_t* v = sbox;
+    for (int k = 0; k < 256; ++k) {
+        v[k] = 0;
+    }
+    i = 0;
+    j = 0;
+}
+
 }  // namespace
 
 StreamEncryptor::StreamEncryptor() {
-    // Initialize S-box to identity permutation
-    for (int k = 0; k < 256; ++k) {
-        S_[k] = static_cast<uint8_t>(k);
-    }
+    // S_ is zeroed by secureClearSBox in init() / destructor before first use;
+    // no need to pre-initialize here — init() overwrites all 256 entries in KSA
 }
 
 StreamEncryptor::~StreamEncryptor() {
-    // Securely clear the S-box
-    std::memset(S_, 0, sizeof(S_));
-    i_ = 0;
-    j_ = 0;
+    secureClearSBox(S_, i_, j_);
     initialized_ = false;
 }
 
@@ -56,10 +62,8 @@ StreamEncryptor::StreamEncryptor(StreamEncryptor&& other) noexcept
     , j_(other.j_)
     , initialized_(other.initialized_) {
     std::memcpy(S_, other.S_, sizeof(S_));
-    // Clear the moved-from object
-    std::memset(other.S_, 0, sizeof(other.S_));
-    other.i_ = 0;
-    other.j_ = 0;
+    // Securely clear the moved-from object
+    secureClearSBox(other.S_, other.i_, other.j_);
     other.initialized_ = false;
 }
 
@@ -69,10 +73,8 @@ StreamEncryptor& StreamEncryptor::operator=(StreamEncryptor&& other) noexcept {
         i_ = other.i_;
         j_ = other.j_;
         initialized_ = other.initialized_;
-        // Clear the moved-from object
-        std::memset(other.S_, 0, sizeof(other.S_));
-        other.i_ = 0;
-        other.j_ = 0;
+        // Securely clear the moved-from object
+        secureClearSBox(other.S_, other.i_, other.j_);
         other.initialized_ = false;
     }
     return *this;
@@ -110,6 +112,9 @@ bool StreamEncryptor::init(const uint8_t* key, size_t keySize,
         j = static_cast<uint8_t>(j + S_[k] + combined[k % combinedSize]);
         swap(S_[k], S_[j]);
     }
+
+    // Securely clear the combined key material from memory
+    KeyDerivation::secureClear(combined);
 
     // Reset PRGA indices
     i_ = 0;

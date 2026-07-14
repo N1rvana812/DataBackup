@@ -17,10 +17,10 @@ namespace backup {
 constexpr const char ARCHIVE_MAGIC[] = "DBAK";
 constexpr const char ARCHIVE_FOOTER_MAGIC[] = "KABD";
 constexpr size_t MAGIC_SIZE = 4;
-constexpr uint16_t ARCHIVE_VERSION = 1;
-constexpr size_t SALT_SIZE = 16;       // PBKDF2 salt
-constexpr size_t IV_SIZE = 16;         // AES-CTR IV
-constexpr size_t AES_KEY_SIZE = 32;    // AES-256 key
+constexpr uint16_t ARCHIVE_VERSION = 2;   // bumped: v1=zlib+AES, v2=RLE+RC4+manualKDF
+constexpr size_t SALT_SIZE = 16;          // random salt for key derivation
+constexpr size_t IV_SIZE = 16;            // random IV for stream cipher init
+constexpr size_t AES_KEY_SIZE = 32;       // derived key size (kept for compat)
 constexpr size_t CHUNK_SIZE = 4096;    // 4KB streaming chunk
 
 // Flags for the global header
@@ -36,10 +36,10 @@ enum ArchiveFlags : uint16_t {
 #pragma pack(push, 1)
 struct ArchiveGlobalHeader {
     char magic[4];            // "DBAK"
-    uint16_t version;         // 1
+    uint16_t version;         // 2 (v1=zlib+AES legacy)
     uint16_t flags;           // bitmask of ArchiveFlags
-    uint8_t salt[16];         // random salt for PBKDF2
-    uint8_t iv[16];           // random IV for AES-CTR
+    uint8_t salt[16];         // random salt for key derivation
+    uint8_t iv[16];           // random IV for stream cipher init
     uint8_t compressionLevel; // 1-9, meaningful only when FLAG_COMPRESSION is set
     uint8_t reserved[7];      // padding to 48 bytes
 };

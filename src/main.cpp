@@ -151,7 +151,7 @@ int runBackup(const CliArgs& args) {
               << "  Source:      " << sourceRoot << '\n'
               << "  Destination: " << archivePath << '\n'
               << "  Compression: " << (config.enableCompression ? "yes" : "no") << '\n'
-              << "  Encryption:  " << (config.enableEncryption ? "yes (AES-256-CTR)" : "no") << '\n';
+              << "  Encryption:  " << (config.enableEncryption ? "yes (RC4 stream cipher)" : "no") << '\n';
 
     if (config.enableCompression) {
         std::cout << "  Comp. level: " << config.compressionLevel << '\n';

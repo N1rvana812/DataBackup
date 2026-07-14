@@ -3,7 +3,7 @@
  * @brief Google Test unit tests for StreamEncryptor (AES-256-CTR)
  *
  * Tests encrypt/decrypt roundtrip, key/IV initialization, streaming behavior,
- * and edge cases.
+ * and edge cases. Tests the RC4 stream cipher implementation.
  */
 
 #include "pipeline/StreamEncryptor.h"
@@ -71,7 +71,7 @@ TEST(StreamEncryptorTest, InitFailsWithWrongKeySize) {
     auto key = makeKey();
     auto iv = makeIv();
 
-    // 16-byte key is invalid for AES-256
+    // keySize != 32 is rejected (API contract, not inherent to RC4)
     EXPECT_FALSE(enc.init(key.data(), 16, iv.data(), iv.size()));
     EXPECT_FALSE(enc.isInitialized());
 }
@@ -101,10 +101,10 @@ TEST(StreamEncryptorTest, RoundtripSmallData) {
     auto ciphertext = enc.encrypt(plaintext.data(), plaintext.size());
     ASSERT_EQ(ciphertext.size(), plaintext.size());
 
-    // CTR mode: ciphertext should differ from plaintext
+    // Stream cipher: ciphertext should differ from plaintext
     EXPECT_NE(ciphertext, plaintext);
 
-    // Re-init to reset the CTR counter for decryption
+    // Re-init to reset the PRGA state for decryption
     ASSERT_TRUE(enc.init(key.data(), key.size(), iv.data(), iv.size()));
     auto decrypted = enc.decrypt(ciphertext.data(), ciphertext.size());
     ASSERT_EQ(decrypted.size(), plaintext.size());
@@ -261,8 +261,7 @@ TEST(StreamEncryptorTest, MoveConstructorPreservesState) {
     StreamEncryptor enc2(std::move(enc1));
     EXPECT_TRUE(enc2.isInitialized());
 
-    // Continue using the moved-from encryptor should be possible with the
-    // same key material (CTR counter state moves along)
+    // The moved-from encryptor can be re-initialized; state was zeroed on move
     ASSERT_TRUE(enc2.init(key.data(), key.size(), iv.data(), iv.size()));
     auto cipher2 = enc2.encrypt(plaintext.data(), plaintext.size());
     EXPECT_EQ(cipher2, ciphertext);
