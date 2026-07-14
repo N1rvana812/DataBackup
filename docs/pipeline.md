@@ -1,35 +1,39 @@
-# feat/encrypt — 流式压缩/加密数据管道模块
+# 数据管道模块
 
-> 分支: `feat/encrypt` | 基于: `main`
+> `include/pipeline/` · `src/pipeline/` | 打包、压缩、加密、归档格式
 
 ## 概述
 
-实现 `docs/encrypt.md` 中定义的功能需求：在备份过程中对数据块进行 **流式压缩 (RLE) → 流式加密 (RC4)** 的管道处理，并将结果写入自定义二进制归档格式。
+管道模块实现备份数据的流式处理：**打包 (StreamPacker) → 压缩 (StreamCompressor) → 加密 (StreamEncryptor)**，并读写自定义二进制归档格式。每阶段可独立启用/禁用，通过 `BackupConfig` 控制。
 
 所有处理以 **4KB Chunk** 为单位流式进行，严禁将整个文件加载到内存；密码在使用后通过 `secureClear()` 安全擦除。
 
-> **2026-07-14 更新**: 压缩、加密、密钥派生后端已全部替换为纯 C++ 手工实现，项目零外部依赖。
-> - 压缩: zlib deflate → PackBits 风格 RLE（运行长度编码）
-> - 加密: OpenSSL AES-256-CTR → RC4 兼容流密码
-> - 密钥派生: OpenSSL PBKDF2-HMAC-SHA256 → 迭代混合函数
+> 全部使用纯 C++ 手工实现，项目零外部依赖。
+> - 压缩: PackBits 风格 RLE
+> - 加密: RC4 兼容流密码
+> - 密钥派生: 迭代混合函数
+> - 打包: 自定义流格式
 
 ---
 
-## 新增文件清单 (11 个新文件)
+## 文件清单
 
 | 文件 | 类型 | 说明 |
 |---|---|---|
 | `include/pipeline/ArchiveFormat.h` | 头文件 | 二进制归档格式定义（魔数、结构体、序列化辅助） |
 | `include/pipeline/ArchiveWriterImpl.h` | 头文件 | IArchiveWriter 接口实现 |
 | `include/pipeline/ArchiveReaderImpl.h` | 头文件 | IArchiveReader 接口实现 |
-| `include/pipeline/StreamCompressor.h` | 头文件 | zlib 流式压缩/解压封装 |
-| `include/pipeline/StreamEncryptor.h` | 头文件 | AES-256-CTR 流式加解密封装 |
-| `include/pipeline/KeyDerivation.h` | 头文件 | PBKDF2 密钥派生 + 随机数生成 |
+| `include/pipeline/StreamPacker.h` | 头文件 | 多文件打包/解包 |
+| `include/pipeline/StreamCompressor.h` | 头文件 | RLE 流式压缩/解压封装 |
+| `include/pipeline/StreamEncryptor.h` | 头文件 | RC4 流式加解密封装 |
+| `include/pipeline/KeyDerivation.h` | 头文件 | 迭代密钥派生 + 随机数生成 |
 | `src/pipeline/ArchiveWriterImpl.cpp` | 源文件 | 归档写入器实现 |
 | `src/pipeline/ArchiveReaderImpl.cpp` | 源文件 | 归档读取器实现 |
-| `src/pipeline/StreamCompressor.cpp` | 源文件 | zlib 压缩实现 |
-| `src/pipeline/StreamEncryptor.cpp` | 源文件 | OpenSSL 加密实现 |
+| `src/pipeline/StreamPacker.cpp` | 源文件 | 打包/解包实现 |
+| `src/pipeline/StreamCompressor.cpp` | 源文件 | RLE 压缩实现 |
+| `src/pipeline/StreamEncryptor.cpp` | 源文件 | RC4 加密实现 |
 | `src/pipeline/KeyDerivation.cpp` | 源文件 | 密钥派生实现 |
+| `include/common/Types.h` | 头文件 | 共享类型 (FileMetaData, BackupConfig) |
 
 ## 修改文件清单 (6 个)
 
@@ -210,6 +214,36 @@ readChunk(buffer, size)
   │    read chunkLen → read encrypted data → decrypt → decompress
   └─ 返回解压后的原始数据
 ```
+
+### StreamPacker — 多文件打包/解包
+
+将多个文件合并为单个连续字节流，位于压缩/加密之前的管道层级。
+
+**打包流格式**：复用 `FileEntryHeader` (39 字节)，每个文件按序拼接：
+```
+[FileEntryHeader] [path] [raw data] ... (重复)
+```
+
+| 方法 | 说明 |
+|---|---|
+| `packHeader(meta) → vector` | 将 FileMetaData 转为 FileEntryHeader + path 字节 |
+| `packData(data, size) → vector` | 透传原始数据字节 |
+| `endPack() → vector` | 结束标记（返回空） |
+| `feedData(data, size)` | 喂入解压解密后的数据 |
+| `tryReadFileMeta(meta) → bool` | 从缓冲区解析下一个文件元数据 |
+| `readFileData(buf, size) → ssize_t` | 读取当前文件的原始数据 |
+
+**设计要点**:
+- 包装器语义: `packHeader` 写入文件元数据，`packData` 写入文件内容
+- 解包器流式读取: `feedData` 累积数据 → `tryReadFileMeta` 识别文件边界 → `readFileData` 提取数据
+- 缓冲区管理: 自动裁剪已消费数据，限制内存增长
+- 文件边界检测: 通过 `pathLength == 0 || > 4096` 识别无效头部
+
+**打包模式下的归档格式**:
+- 归档包含单个 `.packed` 文件条目（占位 FileEntryHeader + 打包数据块）
+- Footer 记录实际源文件数量
+- 全局头设置 `FLAG_PACK` 标志
+- 读取时：跳过 `.packed` 占位头 → 读取 chunk → 解密 → 解压 → feedData → unpack
 
 ---
 
