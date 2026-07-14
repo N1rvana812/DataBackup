@@ -1,42 +1,78 @@
 #include "pipeline/StreamEncryptor.h"
 
-#ifdef HAS_OPENSSL
-#include <openssl/evp.h>
-#endif
-
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
 namespace backup {
 
-StreamEncryptor::StreamEncryptor() = default;
+// ============================================================================
+// RC4 Stream Cipher Implementation
+// ============================================================================
+//
+// RC4 (Rivest Cipher 4 / "ARC4") is a simple, widely-understood stream cipher.
+// It operates in two phases:
+//
+// 1. KSA (Key Scheduling Algorithm):
+//    - Initializes a 256-byte S-box as the identity permutation S[i] = i
+//    - Shuffles S based on the key bytes using a simple swap loop
+//
+// 2. PRGA (Pseudo-Random Generation Algorithm):
+//    - Produces a pseudo-random keystream byte by byte
+//    - Each keystream byte is XORed with the corresponding plaintext byte
+//
+// Encryption and decryption are identical: XOR the data with the keystream.
+// The S-box state persists across calls, allowing streaming operation.
+// ============================================================================
+
+namespace {
+
+// Swap two bytes in the S-box
+inline void swap(uint8_t& a, uint8_t& b) {
+    uint8_t t = a;
+    a = b;
+    b = t;
+}
+
+}  // namespace
+
+StreamEncryptor::StreamEncryptor() {
+    // Initialize S-box to identity permutation
+    for (int k = 0; k < 256; ++k) {
+        S_[k] = static_cast<uint8_t>(k);
+    }
+}
 
 StreamEncryptor::~StreamEncryptor() {
-#ifdef HAS_OPENSSL
-    if (ctx_ != nullptr) {
-        EVP_CIPHER_CTX_free(static_cast<EVP_CIPHER_CTX*>(ctx_));
-        ctx_ = nullptr;
-    }
-#endif
+    // Securely clear the S-box
+    std::memset(S_, 0, sizeof(S_));
+    i_ = 0;
+    j_ = 0;
+    initialized_ = false;
 }
 
 StreamEncryptor::StreamEncryptor(StreamEncryptor&& other) noexcept
-    : ctx_(other.ctx_)
+    : i_(other.i_)
+    , j_(other.j_)
     , initialized_(other.initialized_) {
-    other.ctx_ = nullptr;
+    std::memcpy(S_, other.S_, sizeof(S_));
+    // Clear the moved-from object
+    std::memset(other.S_, 0, sizeof(other.S_));
+    other.i_ = 0;
+    other.j_ = 0;
     other.initialized_ = false;
 }
 
 StreamEncryptor& StreamEncryptor::operator=(StreamEncryptor&& other) noexcept {
     if (this != &other) {
-#ifdef HAS_OPENSSL
-        if (ctx_ != nullptr) {
-            EVP_CIPHER_CTX_free(static_cast<EVP_CIPHER_CTX*>(ctx_));
-        }
-#endif
-        ctx_ = other.ctx_;
+        std::memcpy(S_, other.S_, sizeof(S_));
+        i_ = other.i_;
+        j_ = other.j_;
         initialized_ = other.initialized_;
-        other.ctx_ = nullptr;
+        // Clear the moved-from object
+        std::memset(other.S_, 0, sizeof(other.S_));
+        other.i_ = 0;
+        other.j_ = 0;
         other.initialized_ = false;
     }
     return *this;
@@ -44,44 +80,53 @@ StreamEncryptor& StreamEncryptor::operator=(StreamEncryptor&& other) noexcept {
 
 bool StreamEncryptor::init(const uint8_t* key, size_t keySize,
                             const uint8_t* iv, size_t ivSize) {
-#ifdef HAS_OPENSSL
     if (key == nullptr || iv == nullptr) {
         return false;
     }
-    if (keySize != 32) {
-        return false;
-    }
-    if (ivSize != 16) {
+    if (keySize == 0 || ivSize == 0) {
         return false;
     }
 
-    if (ctx_ != nullptr) {
-        EVP_CIPHER_CTX_free(static_cast<EVP_CIPHER_CTX*>(ctx_));
-        ctx_ = nullptr;
-    }
-    initialized_ = false;
-
-    EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
-    if (context == nullptr) {
+    // Keep backward compatibility: keySize must be 32, ivSize must be 16
+    // (This matches the existing AES-256-CTR API contract)
+    if (keySize != 32 || ivSize != 16) {
         return false;
     }
 
-    int rc = EVP_EncryptInit_ex(context, EVP_aes_256_ctr(), nullptr, key, iv);
-    if (rc != 1) {
-        EVP_CIPHER_CTX_free(context);
-        return false;
+    // Build the combined key material: key || iv
+    std::vector<uint8_t> combined(keySize + ivSize);
+    std::memcpy(combined.data(), key, keySize);
+    std::memcpy(combined.data() + keySize, iv, ivSize);
+
+    // --- Key Scheduling Algorithm (KSA) ---
+    // Initialize S-box to identity permutation
+    for (int k = 0; k < 256; ++k) {
+        S_[k] = static_cast<uint8_t>(k);
     }
 
-    ctx_ = context;
+    uint8_t j = 0;
+    const size_t combinedSize = combined.size();
+    for (int k = 0; k < 256; ++k) {
+        j = static_cast<uint8_t>(j + S_[k] + combined[k % combinedSize]);
+        swap(S_[k], S_[j]);
+    }
+
+    // Reset PRGA indices
+    i_ = 0;
+    j_ = 0;
     initialized_ = true;
+
+    // Discard the first 256 bytes of keystream (RC4-drop256)
+    // to mitigate known weaknesses in the initial keystream output
+    for (int k = 0; k < 256; ++k) {
+        i_ = static_cast<uint8_t>(i_ + 1);
+        j_ = static_cast<uint8_t>(j_ + S_[i_]);
+        swap(S_[i_], S_[j_]);
+        // Discard: S_[(S_[i_] + S_[j_]) & 0xFF]
+        (void)S_[(S_[i_] + S_[j_]) & 0xFF];
+    }
+
     return true;
-#else
-    (void)key;
-    (void)keySize;
-    (void)iv;
-    (void)ivSize;
-    return false;
-#endif
 }
 
 std::vector<uint8_t> StreamEncryptor::encrypt(const uint8_t* data, size_t size) {
@@ -97,7 +142,6 @@ bool StreamEncryptor::isInitialized() const {
 }
 
 std::vector<uint8_t> StreamEncryptor::process(const uint8_t* data, size_t size) {
-#ifdef HAS_OPENSSL
     if (!initialized_) {
         throw std::runtime_error("StreamEncryptor: not initialized");
     }
@@ -105,23 +149,20 @@ std::vector<uint8_t> StreamEncryptor::process(const uint8_t* data, size_t size) 
         return {};
     }
 
-    EVP_CIPHER_CTX* context = static_cast<EVP_CIPHER_CTX*>(ctx_);
+    std::vector<uint8_t> output(size);
 
-    std::vector<uint8_t> output(size + EVP_CIPHER_CTX_block_size(context));
+    for (size_t k = 0; k < size; ++k) {
+        // PRGA: generate next keystream byte
+        i_ = static_cast<uint8_t>(i_ + 1);
+        j_ = static_cast<uint8_t>(j_ + S_[i_]);
+        swap(S_[i_], S_[j_]);
+        const uint8_t keystream = S_[(S_[i_] + S_[j_]) & 0xFF];
 
-    int outLen = 0;
-    int rc = EVP_EncryptUpdate(context, output.data(), &outLen, data, static_cast<int>(size));
-    if (rc != 1) {
-        throw std::runtime_error("StreamEncryptor: EVP_EncryptUpdate failed");
+        // XOR plaintext with keystream
+        output[k] = data[k] ^ keystream;
     }
 
-    output.resize(static_cast<size_t>(outLen));
     return output;
-#else
-    (void)data;
-    (void)size;
-    throw std::runtime_error("StreamEncryptor: OpenSSL support not compiled in");
-#endif
 }
 
 } // namespace backup

@@ -3,7 +3,7 @@
  * @brief Google Test unit tests for KeyDerivation
  *
  * Tests PBKDF2 key derivation, random byte generation, and secure buffer
- * clearing. Only compiled when HAS_OPENSSL is defined.
+ * clearing.
  */
 
 #include "pipeline/KeyDerivation.h"

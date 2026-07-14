@@ -149,16 +149,18 @@ TEST(StreamCompressorTest, CompressionLevelClamped) {
     EXPECT_FALSE(compressed.empty());
 }
 
-TEST(StreamCompressorTest, HigherLevelProducesBetterCompression) {
+TEST(StreamCompressorTest, CompressionLevelProducesSameResult) {
+    // RLE compression uses the same algorithm regardless of level;
+    // the level parameter is kept for API compatibility
     StreamCompressor compFast(1);
     StreamCompressor compBest(9);
-    auto input = makeRepeated(16384, 0x55);  // highly compressible
+    auto input = makeRepeated(16384, 0x55);
 
     auto fastResult = compFast.compress(input.data(), input.size());
     auto bestResult = compBest.compress(input.data(), input.size());
 
-    // Level 9 should produce equal or better compression than level 1
-    EXPECT_LE(bestResult.size(), fastResult.size());
+    EXPECT_EQ(bestResult.size(), fastResult.size());
+    EXPECT_EQ(bestResult, fastResult);
 }
 
 // ============================================================================

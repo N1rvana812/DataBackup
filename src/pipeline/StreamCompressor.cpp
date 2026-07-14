@@ -1,12 +1,51 @@
 #include "pipeline/StreamCompressor.h"
 
-#include <zlib.h>
-
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
 namespace backup {
+
+// ============================================================================
+// Simple Run-Length Encoding (PackBits-style)
+// ============================================================================
+//
+// Compression format:
+//   - Literal block: [0x00-0x7F][count-1][data bytes...]  (1-128 bytes)
+//   - Run block:     [0x80-0xFF][count-1+128][value]       (1-128 repeats)
+//
+// The high bit of the control byte distinguishes runs from literals.
+// Lower 7 bits encode count-1, allowing 1-128 items per block.
+//
+// This is a simple algorithm well-suited for data with repeated byte
+// patterns. Incompressible data may expand by up to ~0.8% worst case
+// (1 control byte per 128 literal bytes).
+// ============================================================================
+
+namespace {
+
+// Encode a run of repeated bytes
+void encodeRun(std::vector<uint8_t>& output, uint8_t value, size_t count) {
+    while (count > 0) {
+        const uint8_t n = static_cast<uint8_t>(std::min(count, size_t(128)) - 1);
+        output.push_back(static_cast<uint8_t>(0x80 | n));
+        output.push_back(value);
+        count -= (n + 1);
+    }
+}
+
+// Encode a literal block
+void encodeLiterals(std::vector<uint8_t>& output, const uint8_t* data, size_t count) {
+    while (count > 0) {
+        const uint8_t n = static_cast<uint8_t>(std::min(count, size_t(128)) - 1);
+        output.push_back(n);  // high bit clear = literal
+        output.insert(output.end(), data, data + n + 1);
+        data += (n + 1);
+        count -= (n + 1);
+    }
+}
+
+}  // namespace
 
 StreamCompressor::StreamCompressor(int level)
     : compressionLevel_(std::clamp(level, 1, 9)) {}
@@ -17,111 +56,83 @@ StreamCompressor::StreamCompressor(StreamCompressor&&) noexcept = default;
 StreamCompressor& StreamCompressor::operator=(StreamCompressor&&) noexcept = default;
 
 std::vector<uint8_t> StreamCompressor::compress(const uint8_t* data, size_t size) {
-    if (data == nullptr && size > 0) {
-        return {};
-    }
-    if (size == 0) {
+    if (data == nullptr || size == 0) {
         return {};
     }
 
-    z_stream strm {};
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
+    std::vector<uint8_t> output;
+    output.reserve(size);  // optimistic: compressed ≤ original
 
-    // Initialize deflate with the configured compression level
-    // Using deflateInit2 with MAX_WBITS + 16 for gzip-compatible format, but
-    // we use raw deflate (-MAX_WBITS) since we manage the format ourselves.
-    int rc = deflateInit2(&strm, compressionLevel_, Z_DEFLATED,
-                          -MAX_WBITS,  // raw deflate, no zlib/gzip header
-                          MAX_MEM_LEVEL,
-                          Z_DEFAULT_STRATEGY);
-    if (rc != Z_OK) {
-        throw std::runtime_error("StreamCompressor: deflateInit2 failed");
+    size_t pos = 0;
+    while (pos < size) {
+        // Count repeating bytes starting at pos
+        size_t runLen = 1;
+        while (pos + runLen < size && data[pos + runLen] == data[pos] && runLen < 128) {
+            ++runLen;
+        }
+
+        if (runLen >= 3) {
+            // Worth encoding as a run (saves at least 1 byte vs literal)
+            encodeRun(output, data[pos], runLen);
+            pos += runLen;
+        } else {
+            // Collect literals until we find a run worth encoding
+            const size_t literalStart = pos;
+            ++pos;
+            while (pos < size) {
+                // Peek ahead: would a run start at 'pos'?
+                size_t peek = 1;
+                while (pos + peek < size && data[pos + peek] == data[pos] && peek < 128) {
+                    ++peek;
+                }
+                if (peek >= 3) {
+                    break;  // stop literal block, next run is profitable
+                }
+                ++pos;
+                if (pos - literalStart >= 128) {
+                    break;  // max literal block size reached
+                }
+            }
+            encodeLiterals(output, data + literalStart, pos - literalStart);
+        }
     }
 
-    strm.next_in = const_cast<Bytef*>(data);
-    strm.avail_in = static_cast<uInt>(size);
-
-    // Allocate output buffer — deflateBound gives the worst-case size
-    const auto bound = deflateBound(&strm, static_cast<uLong>(size));
-    std::vector<uint8_t> output(bound);
-
-    strm.next_out = output.data();
-    strm.avail_out = static_cast<uInt>(output.size());
-
-    // Z_FINISH: this is a one-shot compression of a single chunk
-    rc = deflate(&strm, Z_FINISH);
-    if (rc != Z_STREAM_END) {
-        deflateEnd(&strm);
-        throw std::runtime_error("StreamCompressor: deflate did not finish properly");
-    }
-
-    const size_t compressedSize = strm.total_out;
-    deflateEnd(&strm);
-
-    output.resize(compressedSize);
     return output;
 }
 
 std::vector<uint8_t> StreamCompressor::decompress(const uint8_t* data,
                                                     size_t size,
-                                                    size_t expectedOutSize) {
+                                                    size_t /*expectedOutSize*/) {
     if (data == nullptr || size == 0) {
         return {};
     }
 
-    z_stream strm {};
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-
-    // Raw inflate (matching the raw deflate above)
-    int rc = inflateInit2(&strm, -MAX_WBITS);
-    if (rc != Z_OK) {
-        throw std::runtime_error("StreamCompressor: inflateInit2 failed");
-    }
-
-    strm.next_in = const_cast<Bytef*>(data);
-    strm.avail_in = static_cast<uInt>(size);
-
-    // Allocate output buffer. Start with the expected size, expand if needed.
     std::vector<uint8_t> output;
-    const size_t initialSize = (expectedOutSize > 0) ? expectedOutSize : (size * 2);
-    output.resize(initialSize);
 
-    strm.next_out = output.data();
-    strm.avail_out = static_cast<uInt>(output.size());
+    size_t pos = 0;
+    while (pos < size) {
+        const uint8_t control = data[pos++];
 
-    // Loop in case the output buffer needs to grow
-    for (;;) {
-        rc = inflate(&strm, Z_FINISH);
-
-        if (rc == Z_STREAM_END) {
-            break;  // success
+        if (pos >= size) {
+            throw std::runtime_error("StreamCompressor: truncated RLE data");
         }
 
-        if (rc == Z_BUF_ERROR) {
-            // Output buffer too small, expand it
-            const size_t currentSize = output.size();
-            const size_t newSize = currentSize * 2;
-            output.resize(newSize);
+        const size_t count = (control & 0x7F) + 1;
 
-            // Adjust next_out/avail_out for the expanded buffer
-            // The position within the buffer is (total_out from the original pointer)
-            strm.next_out = output.data() + strm.total_out;
-            strm.avail_out = static_cast<uInt>(newSize - strm.total_out);
-            continue;
+        if (control & 0x80) {
+            // Run block: next byte is the repeated value
+            const uint8_t value = data[pos++];
+            output.insert(output.end(), count, value);
+        } else {
+            // Literal block: next 'count' bytes are raw data
+            if (pos + count > size) {
+                throw std::runtime_error("StreamCompressor: truncated literal block");
+            }
+            output.insert(output.end(), data + pos, data + pos + count);
+            pos += count;
         }
-
-        // Any other return code is an error
-        inflateEnd(&strm);
-        throw std::runtime_error("StreamCompressor: inflate failed with code " +
-                                 std::to_string(rc));
     }
 
-    output.resize(strm.total_out);
-    inflateEnd(&strm);
     return output;
 }
 

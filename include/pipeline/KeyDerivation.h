@@ -8,16 +8,22 @@
 namespace backup {
 
 // ============================================================================
-// PBKDF2-HMAC-SHA256 key derivation for password-based encryption
+// Iterative Key Derivation for password-based encryption
 // ============================================================================
 //
-// The derived key material is split into:
-//   - 32 bytes: AES-256 key
-//   - 16 bytes: AES-CTR IV (derived, NOT the random IV in the global header
-//                which is used as the CTR initial counter value)
+// Implements a simple iterative key stretching algorithm based on a
+// lightweight mixing function (inspired by the FNV-1a hash and basic
+// sponge constructions). The algorithm repeatedly mixes password, salt,
+// and a counter through a 32-bit state machine to produce derived key
+// material of the requested length.
 //
-// Actually, this class derives only the AES key. The IV for CTR mode
-// is randomly generated and stored in the archive header.
+// The algorithm is:
+//   1. Initialize a 64-byte state from password and salt
+//   2. For each iteration, apply a mixing function to the state
+//   3. Extract keySize bytes from the final state, cycling as needed
+//
+// This provides a self-contained key derivation without external
+// cryptographic library dependencies.
 // ============================================================================
 
 class KeyDerivation {

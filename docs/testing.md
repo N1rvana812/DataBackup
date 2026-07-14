@@ -1,10 +1,12 @@
 # 测试框架与环境
 
-> 测试框架: Google Test (gtest) v1.14.0 | CTest | 分支: `feat/encrypt` | 提交: `03bdd59`
+> 测试框架: Google Test (gtest) v1.14.0 | CTest | 分支: `feat/encrypt`
 
 ## 概述
 
 项目引入 Google Test 作为单元测试框架，通过 CMake `FetchContent` 自动下载依赖，无需手动安装。测试覆盖核心引擎（FileFilter、DirectoryTraverser）、数据管道（StreamCompressor、StreamEncryptor、KeyDerivation）和归档格式（ArchiveFormat）等模块。
+
+项目**无外部依赖**——压缩和加密后端均使用纯 C++ 手工实现（RLE 压缩、RC4 流密码、迭代密钥派生），无需安装 zlib 或 OpenSSL。
 
 测试通过 CTest 运行，支持 `ctest --output-on-failure` 查看失败详情，输出兼容 IDE 和 CI 集成。
 
@@ -18,20 +20,19 @@
 |---|---|---|
 | Google Test | v1.14.0 | 单元测试框架，通过 FetchContent 自动下载 |
 | CTest | CMake 3.22+ | 测试运行器，随 CMake 附带 |
-| zlib | 1.2.11+ | StreamCompressor 测试所需 |
-| OpenSSL (libssl-dev) | 3.0+ | StreamEncryptor / KeyDerivation 测试所需（可选） |
 
 ### 编译要求
 
 - **编译器**: GCC 11+ 或 Clang 14+，支持 C++17
 - **CMake**: ≥ 3.14
 - **操作系统**: Linux
+- **外部库**: 无
 
 ### 环境准备
 
 ```bash
-# 安装编译依赖
-sudo apt-get install -y build-essential cmake zlib1g-dev libssl-dev
+# 仅需编译工具链，无需外部库
+sudo apt-get install -y build-essential cmake
 
 # 克隆项目
 git clone https://github.com/N1rvana812/DataBackup.git
@@ -106,24 +107,11 @@ tests/
 ├── test_file_filter.cpp          # FileFilter 测试（16 用例）
 ├── test_archive_format.cpp       # ArchiveFormat 测试（18 用例）
 ├── test_stream_compressor.cpp    # StreamCompressor 测试（17 用例）
-├── test_stream_encryptor.cpp     # StreamEncryptor 测试（14 用例，条件编译）
-└── test_key_derivation.cpp       # KeyDerivation 测试（16 用例，条件编译）
+├── test_stream_encryptor.cpp     # StreamEncryptor 测试（14 用例）
+└── test_key_derivation.cpp       # KeyDerivation 测试（16 用例）
 ```
 
-### 条件编译
-
-`test_stream_encryptor.cpp` 和 `test_key_derivation.cpp` 仅在 OpenSSL 可用时编译。若未安装 `libssl-dev`，CMake 输出警告并跳过这两个文件。
-
-CMake 配置阶段的输出：
-
-```
-# OpenSSL 已安装
--- OpenSSL found — encryption support enabled
-
-# OpenSSL 未安装
--- OpenSSL not found — encryption support disabled.
-   Install libssl-dev for AES encryption support.
-```
+所有测试文件始终编译，不再需要条件编译——压缩和加密均使用纯 C++ 手工实现，无外部依赖。
 
 ---
 
@@ -133,9 +121,9 @@ CMake 配置阶段的输出：
 |---|---|---|---|
 | FileFilter | `test_file_filter.cpp` | 16 | 默认行为、扩展名过滤、隐藏文件、文件大小范围、glob 排除模式、组合过滤 |
 | ArchiveFormat | `test_archive_format.cpp` | 18 | GlobalHeader 初始化/校验、魔数验证、Footer 序列化、FileEntry ↔ FileMetaData 往返转换、结构体大小断言 |
-| StreamCompressor | `test_stream_compressor.cpp` | 17 | 压缩解压往返、压缩级别 (1-9)、高/低可压缩数据、空数据/null 边界、二进制保真、移动语义 |
-| StreamEncryptor | `test_stream_encryptor.cpp` | 14 | 初始化验证、AES-256-CTR 加解密往返、流式分块处理、确定性/唯一性、未初始化异常、移动语义 |
-| KeyDerivation | `test_key_derivation.cpp` | 16 | PBKDF2 密钥派生（正确大小、确定性、差异输入）、随机字节生成、`secureClear` 安全清零、集成流程 |
+| StreamCompressor | `test_stream_compressor.cpp` | 17 | RLE 压缩解压往返、压缩级别兼容、高/低可压缩数据、空数据/null 边界、二进制保真、移动语义 |
+| StreamEncryptor | `test_stream_encryptor.cpp` | 14 | 初始化验证、RC4 加解密往返、流式分块处理、确定性/唯一性、未初始化异常、移动语义 |
+| KeyDerivation | `test_key_derivation.cpp` | 16 | 迭代密钥派生（正确大小、确定性、差异输入）、随机字节生成、`secureClear` 安全清零、集成流程 |
 
 ### 未覆盖范围
 
@@ -146,6 +134,18 @@ CMake 配置阶段的输出：
 | `ArchiveReaderImpl` / `ArchiveWriterImpl` | 依赖完整的归档文件读写流程 |
 | `BackupEngine` | 编排层，依赖上述所有模块 |
 | `IMonitor` / inotify | 依赖内核事件和 Daemon 环境 |
+
+---
+
+## 后端算法
+
+自 commit `3f699f7` 起，压缩和加密均由纯 C++ 手工实现，无外部库依赖：
+
+| 组件 | 算法 | 说明 |
+|---|---|---|
+| StreamCompressor | PackBits 风格 RLE | 运行长度编码：控制字节高位置 1 表示行程，置 0 表示字面量，每块 1–128 字节 |
+| StreamEncryptor | RC4 兼容流密码 | KSA 密钥调度 + PRGA 伪随机生成 + RC4-drop256，XOR 加解密 |
+| KeyDerivation | 迭代混合函数 | 64 字节状态机，基于 32 位算术运算（加、异或、旋转），类海绵结构 |
 
 ---
 
@@ -243,3 +243,4 @@ ctest --output-on-failure
 | 日期 | 提交 | 变更 |
 |---|---|---|
 | 2026-07-14 | `03bdd59` | 引入 gtest 框架，编写 81 个基础单元测试 |
+| 2026-07-14 | — | 重构为纯 C++ 手工后端（RLE/RC4/迭代KDF），移除 zlib/OpenSSL 依赖 |

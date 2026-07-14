@@ -22,22 +22,16 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 # ============================================================================
-# 测试源文件列表
+# 测试源文件列表（所有测试始终编译，无外部依赖条件）
 # ============================================================================
 
 set(TEST_SOURCES
     test_file_filter.cpp
     test_archive_format.cpp
     test_stream_compressor.cpp
+    test_stream_encryptor.cpp
+    test_key_derivation.cpp
 )
-
-# 如果 OpenSSL 可用，添加加密相关测试
-if(OpenSSL_FOUND)
-    list(APPEND TEST_SOURCES
-        test_stream_encryptor.cpp
-        test_key_derivation.cpp
-    )
-endif()
 
 # ============================================================================
 # 创建测试可执行文件

@@ -3,7 +3,7 @@
  * @brief Google Test unit tests for StreamEncryptor (AES-256-CTR)
  *
  * Tests encrypt/decrypt roundtrip, key/IV initialization, streaming behavior,
- * and edge cases. Only compiled when HAS_OPENSSL is defined.
+ * and edge cases.
  */
 
 #include "pipeline/StreamEncryptor.h"
