@@ -87,11 +87,12 @@ bool BackupEngine::backupDirectory(const std::filesystem::path& sourceRoot,
 
 bool BackupEngine::restoreArchive(const std::filesystem::path& archivePath,
                                   IArchiveReader& archiveReader,
-                                  const std::filesystem::path& targetRoot) {
+                                  const std::filesystem::path& targetRoot,
+                                  const BackupConfig& config) {
     stats_ = {};
     lastError_.clear();
 
-    if (!archiveReader.open(archivePath.string())) {
+    if (!archiveReader.open(archivePath.string(), config)) {
         lastError_ = "failed to open archive reader";
         return false;
     }

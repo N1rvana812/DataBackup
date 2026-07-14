@@ -1,0 +1,53 @@
+#pragma once
+
+#include <cstdint>
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace backup {
+
+// ============================================================================
+// PBKDF2-HMAC-SHA256 key derivation for password-based encryption
+// ============================================================================
+//
+// The derived key material is split into:
+//   - 32 bytes: AES-256 key
+//   - 16 bytes: AES-CTR IV (derived, NOT the random IV in the global header
+//                which is used as the CTR initial counter value)
+//
+// Actually, this class derives only the AES key. The IV for CTR mode
+// is randomly generated and stored in the archive header.
+// ============================================================================
+
+class KeyDerivation {
+public:
+    // Derive an AES-256 key from a password and salt using PBKDF2-HMAC-SHA256.
+    // @param password   The user-provided password
+    // @param salt       16-byte random salt
+    // @param keySize    Output key size in bytes (default 32 for AES-256)
+    // @param iterations Number of PBKDF2 iterations (default 100000)
+    // @return           Derived key bytes (keySize bytes)
+    static std::vector<uint8_t> deriveKey(const std::string& password,
+                                           const uint8_t* salt,
+                                           size_t saltSize,
+                                           size_t keySize = 32,
+                                           unsigned int iterations = 100000);
+
+    // Generate cryptographically secure random bytes
+    static std::vector<uint8_t> generateRandomBytes(size_t count);
+
+    // Securely clear a buffer (prevents compiler optimization from removing the clear)
+    template<typename T>
+    static void secureClear(std::vector<T>& buffer) {
+        if (!buffer.empty()) {
+            // Use volatile to prevent compiler from optimizing away the clearing
+            volatile T* ptr = buffer.data();
+            for (size_t i = 0; i < buffer.size(); ++i) {
+                ptr[i] = 0;
+            }
+        }
+    }
+};
+
+} // namespace backup

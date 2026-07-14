@@ -34,7 +34,8 @@ public:
 
     bool restoreArchive(const std::filesystem::path& archivePath,
                         IArchiveReader& archiveReader,
-                        const std::filesystem::path& targetRoot);
+                        const std::filesystem::path& targetRoot,
+                        const BackupConfig& config = BackupConfig());
 
     void setIncrementalHandler(IncrementalHandler handler);
     void onFileEvent(const FileEvent& event) override;

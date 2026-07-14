@@ -8,11 +8,29 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 包含头文件目录
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
+# 查找依赖库
+find_package(ZLIB REQUIRED)
+find_package(OpenSSL QUIET)
+
+# 配置加密支持
+if(OpenSSL_FOUND)
+    message(STATUS "OpenSSL found — encryption support enabled")
+    add_compile_definitions(HAS_OPENSSL)
+    set(CRYPTO_LIBS OpenSSL::Crypto)
+else()
+    message(WARNING "OpenSSL not found — encryption support disabled. "
+                    "Install libssl-dev for AES encryption support.")
+    set(CRYPTO_LIBS "")
+endif()
+
 # 自动收集 src 目录下的所有 .cpp 文件
 file(GLOB_RECURSE SRC_FILES "${PROJECT_SOURCE_DIR}/src/*.cpp")
 
 # 生成可执行文件
 add_executable(databackup ${SRC_FILES})
+
+# 链接依赖库
+target_link_libraries(databackup PRIVATE ZLIB::ZLIB ${CRYPTO_LIBS})
 
 # 开启严格警告
 target_compile_options(databackup PRIVATE -Wall -Wextra -Wpedantic)
