@@ -138,7 +138,7 @@ DataBackup/
 - **关键接口**：
   - `IArchiveWriter.h`：归档写入接口（支持压缩+加密管道）
   - `IArchiveReader.h`：归档读取接口（支持解密+解压管道）
-- **技术要点**：zlib deflate/inflate、OpenSSL AES-CTR、流式处理（4KB Chunk）
+- **技术要点**：RLE 压缩、RC4 流密码、迭代密钥派生、流式处理（4KB Chunk）
 
 #### include/ 和 src/monitor/ - 系统监控模块（负责人：倪申超）
 - **功能**：基于 inotify 的文件系统事件监听、Daemon 守护进程、增量备份触发
@@ -153,11 +153,17 @@ DataBackup/
 - **技术要点**：Google Test 框架、接口 Mock 测试
 
 #### docs/ - 文档目录
-- 需求分析说明书.docx
-- 系统设计文档.docx
-- 软件测试报告.docx
-- UML 用例图、类图、时序图
+- `architecture.md` — 系统架构与模块总览
+- `core-engine.md` — 核心引擎模块
+- `pipeline.md` — 数据管道模块（打包、压缩、加密、归档）
+- `backend-algorithms.md` — 后端算法详细说明（RLE、RC4、KDF）
+- `monitor.md` — 系统监控模块
+- `testing.md` — 测试框架与环境
+- `encrypt.md` — 加密功能用例规格
 
 #### third_party/ - 第三方依赖
 - CLI11：命令行参数解析库
 - nlohmann/json：JSON 配置文件解析
+- Google Test：单元测试框架（通过 CMake FetchContent 自动下载）
+
+> 项目零运行时外部依赖——压缩和加密均为纯 C++ 手工实现。

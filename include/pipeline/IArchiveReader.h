@@ -13,6 +13,7 @@ public:
     virtual ~IArchiveReader() = default;
 
     virtual bool open(const std::string& archivePath) = 0;
+    virtual bool open(const std::string& archivePath, const BackupConfig& config) = 0;
     
     // 读取下一个文件的元数据。如果到达归档末尾，返回false。
     virtual bool getNextFileMeta(FileMetaData& meta) = 0;
