@@ -69,11 +69,6 @@ bool StreamPacker::tryReadFileMeta(FileMetaData& meta) {
     // Need at least a full FileEntryHeader
     const size_t available = buffer_.size() - bufferOffset_;
     if (available < sizeof(FileEntryHeader)) {
-        // If buffer is empty and we've already processed at least one file,
-        // no more entries will ever appear — stream is finished
-        if (available == 0 && !currentMeta_.relativePath.empty()) {
-            finished_ = true;
-        }
         return false;
     }
 

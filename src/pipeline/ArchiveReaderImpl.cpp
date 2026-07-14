@@ -88,6 +88,22 @@ bool ArchiveReaderImpl::open(const std::string& archivePath, const BackupConfig&
 
     if (packingEnabled_) {
         packer_ = std::make_unique<StreamPacker>();
+
+        // Read and discard the packed blob's FileEntryHeader to advance
+        // the file position past it. The actual file metadata is embedded
+        // inside the packed stream, not in this outer header.
+        FileEntryHeader blobHeader{};
+        if (!readRaw(&blobHeader, sizeof(blobHeader))) {
+            close();
+            return false;
+        }
+        if (blobHeader.pathLength > 0) {
+            std::vector<uint8_t> pathBuf(blobHeader.pathLength);
+            if (!readRaw(pathBuf.data(), blobHeader.pathLength)) {
+                close();
+                return false;
+            }
+        }
     }
 
     // Reset file reading state

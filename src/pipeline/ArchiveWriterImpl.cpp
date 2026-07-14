@@ -71,9 +71,10 @@ bool ArchiveWriterImpl::init(const std::string& archivePath, const BackupConfig&
             packedBlobOffset_ = static_cast<uint64_t>(std::ftell(file_));
             FileEntryHeader placeholder{};
             std::memset(&placeholder, 0, sizeof(placeholder));
-            placeholder.pathLength = 8;  // ".packed"
+            const std::string blobPath = ".packed";
+            placeholder.pathLength = static_cast<uint16_t>(blobPath.size());
             if (!writeRaw(&placeholder, sizeof(placeholder))) { cleanup(); return false; }
-            if (!writeRaw(".packed", 8)) { cleanup(); return false; }
+            if (!writeRaw(blobPath.data(), blobPath.size())) { cleanup(); return false; }
             indexOffset_ = packedBlobOffset_;
         } else {
             // Record the index offset (right after the global header)
