@@ -164,6 +164,10 @@ bool Monitor::isRunning() const {
     return running_.load();
 }
 
+const std::string& Monitor::lastError() const {
+    return lastError_;
+}
+
 bool Monitor::addWatch(const std::filesystem::path& path) {
 #ifdef __linux__
     int wd = ::inotify_add_watch(watchFd_, path.c_str(),
@@ -395,12 +399,13 @@ void Monitor::processEvent(uint32_t mask, const std::filesystem::path& path, boo
         return;
     }
 
+    const std::filesystem::path absolutePath = std::filesystem::absolute(path);
     FileEvent event;
-    event.filePath = path.string();
+    event.filePath = absolutePath.string();
     event.type = type;
     event.isDirectory = isDirectory;
     event.timestamp = static_cast<uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
-    const std::string normalizedPath = std::filesystem::absolute(path).string();
+    const std::string normalizedPath = absolutePath.string();
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(mutex_);

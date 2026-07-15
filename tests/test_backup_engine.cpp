@@ -172,5 +172,29 @@ TEST(BackupEngineTest, BackupFailsForMissingSource) {
     EXPECT_FALSE(std::filesystem::exists(archive));
 }
 
+TEST(BackupEngineTest, IncrementalHandlerReceivesFileEvents) {
+    BackupEngine engine;
+    bool triggered = false;
+    FileEvent received;
+
+    engine.setIncrementalHandler([&](const FileEvent& event) {
+        triggered = true;
+        received = event;
+    });
+
+    FileEvent event;
+    event.filePath = "/tmp/example.txt";
+    event.type = FileEventType::CREATED;
+    event.isDirectory = false;
+    event.timestamp = 42;
+
+    engine.onFileEvent(event);
+
+    EXPECT_TRUE(triggered);
+    EXPECT_EQ(received.filePath, "/tmp/example.txt");
+    EXPECT_EQ(received.type, FileEventType::CREATED);
+    EXPECT_FALSE(received.isDirectory);
+}
+
 }  // namespace
 }  // namespace backup
