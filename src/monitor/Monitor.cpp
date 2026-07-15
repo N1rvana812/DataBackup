@@ -164,10 +164,13 @@ bool Monitor::isRunning() const {
     return running_.load();
 }
 
+<<<<<<< HEAD
 const std::string& Monitor::lastError() const {
     return lastError_;
 }
 
+=======
+>>>>>>> f897a96cd93606f462554c4f69ec4df582afc300
 bool Monitor::addWatch(const std::filesystem::path& path) {
 #ifdef __linux__
     int wd = ::inotify_add_watch(watchFd_, path.c_str(),
@@ -399,6 +402,7 @@ void Monitor::processEvent(uint32_t mask, const std::filesystem::path& path, boo
         return;
     }
 
+<<<<<<< HEAD
     const std::filesystem::path absolutePath = std::filesystem::absolute(path);
     FileEvent event;
     event.filePath = absolutePath.string();
@@ -406,6 +410,14 @@ void Monitor::processEvent(uint32_t mask, const std::filesystem::path& path, boo
     event.isDirectory = isDirectory;
     event.timestamp = static_cast<uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
     const std::string normalizedPath = absolutePath.string();
+=======
+    FileEvent event;
+    event.filePath = path.string();
+    event.type = type;
+    event.isDirectory = isDirectory;
+    event.timestamp = static_cast<uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+    const std::string normalizedPath = std::filesystem::absolute(path).string();
+>>>>>>> f897a96cd93606f462554c4f69ec4df582afc300
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(mutex_);
