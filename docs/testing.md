@@ -4,7 +4,7 @@
 
 ## 概述
 
-项目引入 Google Test 作为单元测试框架，通过 CMake `FetchContent` 自动下载依赖，无需手动安装。测试覆盖核心引擎（FileFilter、DirectoryTraverser）、数据管道（StreamCompressor、StreamEncryptor、KeyDerivation）和归档格式（ArchiveFormat）等模块。
+项目引入 Google Test 作为单元测试框架，通过 CMake `FetchContent` 自动下载依赖，无需手动安装。测试覆盖核心引擎（FileFilter、DirectoryTraverser、FileSystemReader、FileSystemWriter、BackupEngine）、数据管道（StreamCompressor、StreamEncryptor、StreamPacker、KeyDerivation）、归档格式（ArchiveFormat）和归档读写实现（ArchiveReaderImpl、ArchiveWriterImpl）等模块。
 
 项目**无外部依赖**——压缩和加密后端均使用纯 C++ 手工实现（RLE 压缩、RC4 流密码、迭代密钥派生），无需安装 zlib 或 OpenSSL。
 
@@ -105,14 +105,17 @@ ctest --output-on-failure
 tests/
 ├── CMakeLists.txt                # 测试构建配置（FetchContent gtest）
 ├── test_file_filter.cpp          # FileFilter 测试（16 用例）
+├── test_core_filesystem.cpp      # DirectoryTraverser/FileSystemReader/FileSystemWriter 测试（9 用例）
 ├── test_archive_format.cpp       # ArchiveFormat 测试（18 用例）
+├── test_archive_impl.cpp         # ArchiveReaderImpl/ArchiveWriterImpl 集成测试（4 用例）
+├── test_backup_engine.cpp        # BackupEngine 端到端测试（4 用例）
 ├── test_stream_compressor.cpp    # StreamCompressor 测试（17 用例）
 ├── test_stream_encryptor.cpp     # StreamEncryptor 测试（14 用例）
 ├── test_key_derivation.cpp       # KeyDerivation 测试（16 用例）
 └── test_stream_packer.cpp        # StreamPacker 测试（22 用例）
 ```
 
-所有测试文件始终编译，不再需要条件编译——压缩和加密均使用纯 C++ 手工实现，无外部依赖。
+所有测试文件始终编译，不再需要条件编译——压缩和加密均使用纯 C++ 手工实现，无外部依赖。当前包含 120 个 gtest 用例，另有 1 个 CTest CLI 冒烟测试（`databackup_cli_help`）。
 
 ---
 
@@ -121,21 +124,24 @@ tests/
 | 模块 | 测试文件 | 用例数 | 覆盖内容 |
 |---|---|---|---|
 | FileFilter | `test_file_filter.cpp` | 16 | 默认行为、扩展名过滤、隐藏文件、文件大小范围、glob 排除模式、组合过滤 |
+| DirectoryTraverser | `test_core_filesystem.cpp` | 3 | 临时目录扫描、相对路径排序、目录/文件元数据、过滤规则、非法源路径错误 |
+| FileSystemReader | `test_core_filesystem.cpp` | 3 | 分块读取、元数据读取、目录 EOF、绝对路径和 `..` 路径逃逸防护 |
+| FileSystemWriter | `test_core_filesystem.cpp` | 3 | 自动创建父目录、分块写入、路径逃逸防护、目录元数据应用 |
 | ArchiveFormat | `test_archive_format.cpp` | 18 | GlobalHeader 初始化/校验、魔数验证、Footer 序列化、FileEntry ↔ FileMetaData 往返转换、结构体大小断言 |
+| ArchiveReaderImpl / ArchiveWriterImpl | `test_archive_impl.cpp` | 4 | 真实归档文件读写、多条目往返、压缩+加密+打包组合、加密归档缺密码失败、非法魔数拒绝 |
+| BackupEngine | `test_backup_engine.cpp` | 4 | 真实目录备份恢复、全管道配置、过滤规则集成、缺失源路径错误 |
 | StreamCompressor | `test_stream_compressor.cpp` | 17 | RLE 压缩解压往返、压缩级别兼容、高/低可压缩数据、空数据/null 边界、二进制保真、移动语义 |
 | StreamEncryptor | `test_stream_encryptor.cpp` | 14 | 初始化验证、RC4 加解密往返、流式分块处理、确定性/唯一性、未初始化异常、移动语义 |
 | StreamPacker | `test_stream_packer.cpp` | 22 | 打包/解包往返、多文件/目录混合、二进制保真、空/大文件、不完整头部、状态重置、移动语义、元数据往返 |
 | KeyDerivation | `test_key_derivation.cpp` | 16 | 迭代密钥派生（正确大小、确定性、差异输入）、随机字节生成、`secureClear` 安全清零、集成流程 |
+| CLI help | `tests/CMakeLists.txt` / CTest | 1 | `databackup --help` 返回成功并输出 Usage |
 
 ### 未覆盖范围
 
 | 模块 | 原因 |
 |---|---|
-| `DirectoryTraverser` | 依赖真实文件系统，需集成测试环境（临时目录） |
-| `FileSystemReader` / `FileSystemWriter` | 依赖真实文件 I/O，需集成测试环境 |
-| `ArchiveReaderImpl` / `ArchiveWriterImpl` | 依赖完整的归档文件读写流程 |
-| `BackupEngine` | 编排层，依赖上述所有模块 |
-| `IMonitor` / inotify | 依赖内核事件和 Daemon 环境 |
+| `IMonitor` / inotify | 当前只有接口头文件，尚无 `src/monitor` 具体实现；后续实现后需要内核事件和 Daemon 环境测试 |
+| CLI backup/restore 参数矩阵 | 当前只有 `--help` 冒烟测试；完整 CLI 备份/恢复组合仍建议补 CTest 或脚本级集成测试 |
 
 ---
 
@@ -164,7 +170,8 @@ CMakeLists.txt (根)
         ├── FetchContent(googletest v1.14.0)    ← 自动下载 gtest
         ├── add_executable(databackup_tests)    ← 测试可执行文件
         ├── target_link_libraries(... gtest_main gtest databackup_lib)
-        └── gtest_discover_tests(...)            ← 自动注册到 CTest
+        ├── gtest_discover_tests(...)            ← 自动注册 gtest 用例到 CTest
+        └── add_test(databackup_cli_help ...)    ← 注册 CLI 冒烟测试
 ```
 
 ### 静态库复用
@@ -182,10 +189,14 @@ libdatabackup_lib.a
        │
        └── databackup_tests (测试)
                ├── test_file_filter.cpp
+               ├── test_core_filesystem.cpp
                ├── test_archive_format.cpp
+               ├── test_archive_impl.cpp
+               ├── test_backup_engine.cpp
                ├── test_stream_compressor.cpp
                ├── test_stream_encryptor.cpp
-               └── test_key_derivation.cpp
+               ├── test_key_derivation.cpp
+               └── test_stream_packer.cpp
 ```
 
 ---
@@ -247,3 +258,4 @@ ctest --output-on-failure
 | 2026-07-14 | 引入 gtest 框架，编写 81 个基础单元测试 |
 | 2026-07-14 | 重构为纯 C++ 手工后端（RLE/RC4/迭代KDF），移除 zlib/OpenSSL 依赖 |
 | 2026-07-15 | 新增 StreamPacker 测试 (22 用例)，总计 103 测试 |
+| 2026-07-15 | 新增核心文件系统、归档实现、BackupEngine 集成测试和 CLI help 冒烟测试；总计 120 个 gtest 用例 + 1 个 CTest CLI 测试 |
