@@ -27,7 +27,10 @@ FetchContent_MakeAvailable(googletest)
 
 set(TEST_SOURCES
     test_file_filter.cpp
+    test_core_filesystem.cpp
     test_archive_format.cpp
+    test_archive_impl.cpp
+    test_backup_engine.cpp
     test_stream_compressor.cpp
     test_stream_encryptor.cpp
     test_key_derivation.cpp
@@ -52,4 +55,9 @@ target_compile_options(databackup_tests PRIVATE -Wall -Wextra -Wpedantic)
 include(GoogleTest)
 gtest_discover_tests(databackup_tests
     DISCOVERY_MODE PRE_TEST
+)
+
+add_test(NAME databackup_cli_help COMMAND databackup --help)
+set_tests_properties(databackup_cli_help PROPERTIES
+    PASS_REGULAR_EXPRESSION "Usage"
 )
