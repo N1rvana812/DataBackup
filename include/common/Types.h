@@ -1,8 +1,9 @@
 #pragma once
 
+#include "common/PlatformCompat.h"
+
 #include <string>
 #include <cstdint>
-#include <sys/stat.h> // 用于 mode_t, uid_t, gid_t, time_t
 
 namespace backup {
 

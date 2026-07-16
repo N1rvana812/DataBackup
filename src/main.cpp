@@ -1,13 +1,18 @@
 #include "common/Types.h"
 #include "core/BackupEngine.h"
 #include "core/FileFilter.h"
+#include "monitor/Monitor.h"
 #include "pipeline/ArchiveReaderImpl.h"
 #include "pipeline/ArchiveWriterImpl.h"
 
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -16,7 +21,8 @@ void printUsage(const char* progName) {
     std::cout << "DataBackup - High-efficiency secure data backup tool\n\n"
               << "Usage:\n"
               << "  " << progName << " backup -s <source> -d <dest> [options]\n"
-              << "  " << progName << " restore -s <archive> -d <target> [options]\n\n"
+              << "  " << progName << " restore -s <archive> -d <target> [options]\n"
+              << "  " << progName << " watch -s <source> -d <dest> [options]\n\n"
               << "Backup Options:\n"
               << "  -s, --source <path>     Source directory to backup\n"
               << "  -d, --dest <path>       Destination archive file (.dbak)\n"
@@ -51,6 +57,7 @@ struct CliArgs {
     bool compress = false;
     bool encrypt = false;
     bool pack = false;
+    bool daemon = false;
     std::string password;
     int compressionLevel = 6;
 };
@@ -62,7 +69,7 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
 
     args.command = argv[1];
 
-    if (args.command != "backup" && args.command != "restore") {
+    if (args.command != "backup" && args.command != "restore" && args.command != "watch") {
         return false;
     }
 
@@ -87,6 +94,8 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
             args.encrypt = true;
         } else if (arg == "--pack") {
             args.pack = true;
+        } else if (arg == "--daemon") {
+            args.daemon = true;
         } else if (arg == "--password") {
             if (++i >= argc) {
                 std::cerr << "[ERROR] Missing value for " << arg << '\n';
@@ -120,7 +129,7 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
         return false;
     }
 
-    if (args.command == "backup" && args.encrypt && args.password.empty()) {
+    if ((args.command == "backup" || args.command == "watch") && args.encrypt && args.password.empty()) {
         std::cerr << "[ERROR] Password is required when encryption is enabled (--password)\n";
         return false;
     }
@@ -136,6 +145,20 @@ backup::BackupConfig buildConfig(const CliArgs& args) {
     config.password = args.password;
     config.compressionLevel = args.compressionLevel;
     return config;
+}
+
+std::filesystem::path resolveArchivePath(const CliArgs& args) {
+    const std::filesystem::path dest(args.dest);
+    if (dest.empty()) {
+        return {};
+    }
+
+    std::error_code ec;
+    if (std::filesystem::exists(dest, ec) && !ec && std::filesystem::is_directory(dest, ec) && !ec) {
+        return dest / "databackup-watch.dbak";
+    }
+
+    return dest;
 }
 
 int runBackup(const CliArgs& args) {
@@ -176,6 +199,82 @@ int runBackup(const CliArgs& args) {
               << "  Files:       " << stats.filesProcessed << '\n'
               << "  Directories: " << stats.directoriesProcessed << '\n'
               << "  Bytes:       " << stats.bytesProcessed << '\n';
+
+    return 0;
+}
+
+int runWatch(const CliArgs& args) {
+    const auto config = buildConfig(args);
+    const std::filesystem::path sourceRoot(args.source);
+    const std::filesystem::path archivePath = resolveArchivePath(args);
+
+    if (!std::filesystem::exists(sourceRoot)) {
+        std::cerr << "[ERROR] Source path does not exist: " << sourceRoot << '\n';
+        return 1;
+    }
+    if (!std::filesystem::is_directory(sourceRoot)) {
+        std::cerr << "[ERROR] Source path is not a directory: " << sourceRoot << '\n';
+        return 1;
+    }
+    if (archivePath.empty()) {
+        std::cerr << "[ERROR] Destination path is required for watch mode (-d/--dest)\n";
+        return 1;
+    }
+
+    std::cout << "[INFO] Starting real-time backup watch:\n"
+              << "  Source:      " << sourceRoot << '\n'
+              << "  Destination: " << archivePath << '\n'
+              << "  Compression: " << (config.enableCompression ? "yes" : "no") << '\n'
+              << "  Packing:     " << (config.enablePacking ? "yes" : "no") << '\n'
+              << "  Encryption:  " << (config.enableEncryption ? "yes (RC4 stream cipher)" : "no") << '\n';
+
+    auto engine = std::make_shared<backup::BackupEngine>();
+    std::mutex backupMutex;
+    std::chrono::steady_clock::time_point lastBackupTime;
+    const auto backupOnce = [&](const backup::FileEvent&) {
+        const auto now = std::chrono::steady_clock::now();
+        std::lock_guard<std::mutex> lock(backupMutex);
+        if (lastBackupTime.time_since_epoch().count() != 0 &&
+            now - lastBackupTime < std::chrono::seconds(1)) {
+            return;
+        }
+        lastBackupTime = now;
+        std::cout << "[INFO] Detected file change, triggering backup..." << std::endl;
+        backup::ArchiveWriterImpl writer;
+        if (!engine->backupDirectory(sourceRoot, archivePath, writer, config)) {
+            std::cerr << "[ERROR] Incremental backup failed: " << engine->lastError() << '\n';
+            return;
+        }
+        const auto& stats = engine->stats();
+        std::cout << "[INFO] Backup completed: files=" << stats.filesProcessed
+                  << ", directories=" << stats.directoriesProcessed
+                  << ", bytes=" << stats.bytesProcessed << std::endl;
+    };
+
+    engine->setIncrementalHandler(backupOnce);
+
+    backup::Monitor monitor;
+    backup::MonitorConfig monitorConfig;
+    monitorConfig.watchPath = sourceRoot.string();
+    monitorConfig.runAsDaemon = args.daemon;
+    if (args.daemon) {
+        std::filesystem::path monitorDir = archivePath.parent_path();
+        if (monitorDir.empty()) {
+            monitorDir = std::filesystem::current_path();
+        }
+        monitorConfig.pidFilePath = (monitorDir / "databackup-watch.pid").string();
+        monitorConfig.logFilePath = (monitorDir / "databackup-watch.log").string();
+    }
+
+    if (!monitor.start(monitorConfig, engine)) {
+        std::cerr << "[ERROR] Failed to start monitor: " << monitor.lastError() << '\n';
+        return 1;
+    }
+
+    std::cout << "[INFO] Watching for changes. Press Ctrl+C to stop." << std::endl;
+    while (monitor.isRunning()) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
 
     return 0;
 }
@@ -224,6 +323,10 @@ int main(int argc, char* argv[]) {
 
     if (args.command == "backup") {
         return runBackup(args);
+    }
+
+    if (args.command == "watch") {
+        return runWatch(args);
     }
 
     if (args.command == "restore") {

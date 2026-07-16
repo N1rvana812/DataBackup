@@ -5,7 +5,13 @@
 #include <cstring>
 #include <system_error>
 
+#include "common/PlatformCompat.h"
+
+#if defined(_WIN32)
+#include <io.h>
+#else
 #include <sys/stat.h>
+#endif
 
 namespace backup {
 namespace {
@@ -14,20 +20,31 @@ bool fillMetaData(const std::filesystem::path& absolutePath,
                   const std::filesystem::path& relativePath,
                   FileMetaData& meta,
                   std::string& error) {
+#if defined(_WIN32)
+    struct _stat64 st {};
+    const std::string widePath = absolutePath.string();
+    if (::_stat64(widePath.c_str(), &st) != 0) {
+#else
     struct stat st {};
     if (::lstat(absolutePath.c_str(), &st) != 0) {
+#endif
         error = absolutePath.string() + ": " + std::strerror(errno);
         return false;
     }
 
     meta.relativePath = relativePath.generic_string();
-    meta.permissions = st.st_mode;
-    meta.ownerId = st.st_uid;
-    meta.groupId = st.st_gid;
+    meta.permissions = static_cast<mode_t>(st.st_mode);
+    meta.ownerId = static_cast<uid_t>(st.st_uid);
+    meta.groupId = static_cast<gid_t>(st.st_gid);
     meta.accessTime = st.st_atime;
     meta.modifyTime = st.st_mtime;
+#if defined(_WIN32)
+    meta.isDirectory = (st.st_mode & _S_IFDIR) != 0;
+    meta.fileSize = (st.st_mode & _S_IFREG) != 0 ? static_cast<uint64_t>(st.st_size) : 0;
+#else
     meta.isDirectory = S_ISDIR(st.st_mode);
     meta.fileSize = S_ISREG(st.st_mode) ? static_cast<uint64_t>(st.st_size) : 0;
+#endif
     return true;
 }
 

@@ -61,3 +61,13 @@ add_test(NAME databackup_cli_help COMMAND databackup --help)
 set_tests_properties(databackup_cli_help PROPERTIES
     PASS_REGULAR_EXPRESSION "Usage"
 )
+
+add_executable(monitor_tests
+    MonitorTests.cpp
+)
+
+target_link_libraries(monitor_tests PRIVATE databackup_lib)
+
+target_compile_options(monitor_tests PRIVATE -Wall -Wextra -Wpedantic)
+
+add_test(NAME MonitorTests COMMAND monitor_tests)
