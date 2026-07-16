@@ -150,6 +150,41 @@ TEST(FileFilterTest, MinAndMaxFileSizeRange) {
     EXPECT_FALSE(filter.shouldInclude(makeMeta("huge.txt", false, 2000)));
 }
 
+TEST(FileFilterTest, ModifiedTimeRangeFilter) {
+    FilterOptions opts;
+    opts.hasMinModifyTime = true;
+    opts.minModifyTime = 1000;
+    opts.hasMaxModifyTime = true;
+    opts.maxModifyTime = 2000;
+    FileFilter filter(opts);
+
+    auto oldFile = makeMeta("old.txt");
+    oldFile.modifyTime = 999;
+    auto midFile = makeMeta("mid.txt");
+    midFile.modifyTime = 1500;
+    auto newFile = makeMeta("new.txt");
+    newFile.modifyTime = 2001;
+
+    EXPECT_FALSE(filter.shouldInclude(oldFile));
+    EXPECT_TRUE(filter.shouldInclude(midFile));
+    EXPECT_FALSE(filter.shouldInclude(newFile));
+}
+
+TEST(FileFilterTest, OwnerIdFilter) {
+    FilterOptions opts;
+    opts.hasOwnerId = true;
+    opts.ownerId = 1000;
+    FileFilter filter(opts);
+
+    auto ownedFile = makeMeta("owned.txt");
+    ownedFile.ownerId = 1000;
+    auto otherFile = makeMeta("other.txt");
+    otherFile.ownerId = 1001;
+
+    EXPECT_TRUE(filter.shouldInclude(ownedFile));
+    EXPECT_FALSE(filter.shouldInclude(otherFile));
+}
+
 // ============================================================================
 // Exclude patterns (fnmatch/glob)
 // ============================================================================

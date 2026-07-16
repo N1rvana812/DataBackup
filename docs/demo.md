@@ -81,7 +81,65 @@ diff -r /tmp/dbdemo/source /tmp/dbdemo/basic_restore
 
 如果 `diff` 没有输出，说明恢复内容和源目录一致。
 
-## 6. 压缩、打包、加密备份
+## 6. 自定义备份筛选
+
+先准备一些用于筛选的文件：
+
+```bash
+echo "temporary log" > /tmp/dbdemo/source/debug.log
+echo "hidden content" > /tmp/dbdemo/source/.hidden.txt
+echo "old content" > /tmp/dbdemo/source/old.txt
+touch -d "2000-01-01 00:00:00" /tmp/dbdemo/source/old.txt
+```
+
+设置筛选条件：
+
+```bash
+AFTER_TS="$(date -d '2020-01-01 00:00:00' +%s)"
+CURRENT_UID="$(id -u)"
+```
+
+执行自定义备份：
+
+```bash
+./build/databackup backup \
+  -s /tmp/dbdemo/source \
+  -d /tmp/dbdemo/custom.dbak \
+  --include-ext .txt \
+  --include-ext .md \
+  --exclude "*.log" \
+  --exclude-hidden \
+  --exclude-dirs \
+  --min-size 1 \
+  --modified-after "$AFTER_TS" \
+  --owner "$CURRENT_UID"
+```
+
+恢复并验证：
+
+```bash
+./build/databackup restore \
+  -s /tmp/dbdemo/custom.dbak \
+  -d /tmp/dbdemo/custom_restore
+
+find /tmp/dbdemo/custom_restore -print
+```
+
+预期现象：
+
+- `debug.log` 不会被恢复，因为被 `--exclude "*.log"` 排除。
+- `.hidden.txt` 不会被恢复，因为启用了 `--exclude-hidden`。
+- `old.txt` 不会被恢复，因为修改时间早于 `--modified-after`。
+- `.txt` 和 `.md` 文件会被保留，因为通过了 `--include-ext`。
+- `--owner "$(id -u)"` 表示只备份当前用户拥有的文件。
+
+说明点：
+
+- 自定义备份由 `FilterOptions` 和 `FileFilter` 实现。
+- CLI 参数最终传入 `BackupEngine::backupDirectory()`。
+- 当前支持路径/名字、扩展名、大小、隐藏文件、目录、修改时间、属主 UID 筛选。
+
+## 7. 压缩、打包、加密备份
 
 ```bash
 ./build/databackup backup \
@@ -112,7 +170,7 @@ diff -r /tmp/dbdemo/source /tmp/dbdemo/basic_restore
 diff -r /tmp/dbdemo/source /tmp/dbdemo/secure_restore
 ```
 
-## 7. 错误密码演示
+## 8. 错误密码演示
 
 ```bash
 ./build/databackup restore \
@@ -126,7 +184,7 @@ diff -r /tmp/dbdemo/source /tmp/dbdemo/secure_restore
 - 加密归档需要正确密码才能恢复。
 - 该步骤用于展示加密保护效果。
 
-## 8. 实时监控备份
+## 9. 实时监控备份
 
 打开第一个终端，启动监控：
 
@@ -167,7 +225,7 @@ diff -r /tmp/dbdemo/source /tmp/dbdemo/watch_restore
 
 停止监控时，在第一个终端按 `Ctrl+C`。
 
-## 9. Daemon 模式演示
+## 10. Daemon 模式演示
 
 ```bash
 ./build/databackup watch \
@@ -202,7 +260,7 @@ tail -f /tmp/dbdemo/databackup-watch.log
 kill "$(cat /tmp/dbdemo/databackup-watch.pid)"
 ```
 
-## 10. 帮助信息
+## 11. 帮助信息
 
 ```bash
 ./build/databackup --help

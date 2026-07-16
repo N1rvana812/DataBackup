@@ -104,11 +104,11 @@ ctest --output-on-failure
 ```
 tests/
 ├── CMakeLists.txt                # 测试构建配置（FetchContent gtest）
-├── test_file_filter.cpp          # FileFilter 测试（16 用例）
+├── test_file_filter.cpp          # FileFilter 测试（18 用例）
 ├── test_core_filesystem.cpp      # DirectoryTraverser/FileSystemReader/FileSystemWriter 测试（9 用例）
 ├── test_archive_format.cpp       # ArchiveFormat 测试（18 用例）
 ├── test_archive_impl.cpp         # ArchiveReaderImpl/ArchiveWriterImpl 集成测试（4 用例）
-├── test_backup_engine.cpp        # BackupEngine 端到端测试（4 用例）
+├── test_backup_engine.cpp        # BackupEngine 端到端测试（6 用例）
 ├── test_stream_compressor.cpp    # StreamCompressor 测试（17 用例）
 ├── test_stream_encryptor.cpp     # StreamEncryptor 测试（14 用例）
 ├── test_key_derivation.cpp       # KeyDerivation 测试（16 用例）
@@ -116,7 +116,7 @@ tests/
 └── MonitorTests.cpp              # Monitor inotify 集成测试（4 个自定义检查）
 ```
 
-所有测试文件始终编译，不再需要条件编译——压缩和加密均使用纯 C++ 手工实现，无外部依赖。当前包含 120 个 gtest 用例，另有 2 个 CTest 测试目标（`databackup_cli_help`、`MonitorTests`）。
+所有测试文件始终编译，不再需要条件编译——压缩和加密均使用纯 C++ 手工实现，无外部依赖。当前包含 124 个 gtest 用例，另有 2 个 CTest 测试目标（`databackup_cli_help`、`MonitorTests`）。
 
 ---
 
@@ -124,13 +124,13 @@ tests/
 
 | 模块 | 测试文件 | 用例数 | 覆盖内容 |
 |---|---|---|---|
-| FileFilter | `test_file_filter.cpp` | 16 | 默认行为、扩展名过滤、隐藏文件、文件大小范围、glob 排除模式、组合过滤 |
+| FileFilter | `test_file_filter.cpp` | 18 | 默认行为、扩展名过滤、隐藏文件、文件大小范围、修改时间范围、属主 UID、glob 排除模式、组合过滤 |
 | DirectoryTraverser | `test_core_filesystem.cpp` | 3 | 临时目录扫描、相对路径排序、目录/文件元数据、过滤规则、非法源路径错误 |
 | FileSystemReader | `test_core_filesystem.cpp` | 3 | 分块读取、元数据读取、目录 EOF、绝对路径和 `..` 路径逃逸防护 |
 | FileSystemWriter | `test_core_filesystem.cpp` | 3 | 自动创建父目录、分块写入、路径逃逸防护、目录元数据应用 |
 | ArchiveFormat | `test_archive_format.cpp` | 18 | GlobalHeader 初始化/校验、魔数验证、Footer 序列化、FileEntry ↔ FileMetaData 往返转换、结构体大小断言 |
 | ArchiveReaderImpl / ArchiveWriterImpl | `test_archive_impl.cpp` | 4 | 真实归档文件读写、多条目往返、压缩+加密+打包组合、加密归档缺密码失败、非法魔数拒绝 |
-| BackupEngine | `test_backup_engine.cpp` | 4 | 真实目录备份恢复、全管道配置、过滤规则集成、缺失源路径错误 |
+| BackupEngine | `test_backup_engine.cpp` | 6 | 真实目录备份恢复、全管道配置、过滤规则集成、时间和属主筛选集成、缺失源路径错误、增量事件回调 |
 | StreamCompressor | `test_stream_compressor.cpp` | 17 | RLE 压缩解压往返、压缩级别兼容、高/低可压缩数据、空数据/null 边界、二进制保真、移动语义 |
 | StreamEncryptor | `test_stream_encryptor.cpp` | 14 | 初始化验证、RC4 加解密往返、流式分块处理、确定性/唯一性、未初始化异常、移动语义 |
 | StreamPacker | `test_stream_packer.cpp` | 22 | 打包/解包往返、多文件/目录混合、二进制保真、空/大文件、不完整头部、状态重置、移动语义、元数据往返 |
@@ -263,3 +263,4 @@ ctest --output-on-failure
 | 2026-07-15 | 新增 StreamPacker 测试 (22 用例)，总计 103 测试 |
 | 2026-07-15 | 新增核心文件系统、归档实现、BackupEngine 集成测试和 CLI help 冒烟测试；总计 120 个 gtest 用例 + 1 个 CTest CLI 测试 |
 | 2026-07-16 | 接入 Monitor 集成测试目标，CTest 总计 123 个测试条目 |
+| 2026-07-16 | 新增修改时间和属主 UID 筛选测试，CTest 总计 126 个测试条目 |

@@ -83,6 +83,18 @@ bool FileFilter::shouldInclude(const FileMetaData& meta) const {
             return false;
         }
 
+        if (options_.hasMinModifyTime && meta.modifyTime < options_.minModifyTime) {
+            return false;
+        }
+
+        if (options_.hasMaxModifyTime && meta.modifyTime > options_.maxModifyTime) {
+            return false;
+        }
+
+        if (options_.hasOwnerId && meta.ownerId != options_.ownerId) {
+            return false;
+        }
+
         if (!options_.includeExtensions.empty()) {
             const std::string extension = relativePath.extension().string();
             bool matched = false;
