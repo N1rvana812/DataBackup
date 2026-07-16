@@ -8,9 +8,12 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -30,7 +33,16 @@ void printUsage(const char* progName) {
               << "  --pack                  Enable multi-file packing\n"
               << "  --encrypt               Enable RC4 stream encryption\n"
               << "  --password <pwd>        Encryption password\n"
-              << "  --level <1-9>           Compression level (default: 6)\n\n"
+              << "  --level <1-9>           Compression level (default: 6)\n"
+              << "  --exclude <pattern>     Exclude files by glob pattern, repeatable\n"
+              << "  --include-ext <ext>     Include only extension, e.g. .txt, repeatable\n"
+              << "  --min-size <bytes>      Include files at least this size\n"
+              << "  --max-size <bytes>      Include files at most this size\n"
+              << "  --modified-after <ts>   Include files modified at/after Unix timestamp\n"
+              << "  --modified-before <ts>  Include files modified at/before Unix timestamp\n"
+              << "  --owner <uid>           Include files owned by numeric UID\n"
+              << "  --exclude-hidden        Exclude hidden files/directories\n"
+              << "  --exclude-dirs          Exclude directory entries from archive\n\n"
               << "Restore Options:\n"
               << "  -s, --source <path>     Source archive file (.dbak)\n"
               << "  -d, --dest <path>       Target directory to restore to\n"
@@ -60,7 +72,43 @@ struct CliArgs {
     bool daemon = false;
     std::string password;
     int compressionLevel = 6;
+    backup::FilterOptions filterOptions;
 };
+
+bool parseUnsigned(const std::string& text, uint64_t& value) {
+    try {
+        size_t consumed = 0;
+        const unsigned long long parsed = std::stoull(text, &consumed, 10);
+        if (consumed != text.size()) {
+            return false;
+        }
+        value = static_cast<uint64_t>(parsed);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool parseTimeValue(const std::string& text, time_t& value) {
+    try {
+        size_t consumed = 0;
+        const long long parsed = std::stoll(text, &consumed, 10);
+        if (consumed != text.size()) {
+            return false;
+        }
+        value = static_cast<time_t>(parsed);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+std::string normalizeExtension(std::string extension) {
+    if (!extension.empty() && extension.front() != '.') {
+        extension.insert(extension.begin(), '.');
+    }
+    return extension;
+}
 
 bool parseArgs(int argc, char* argv[], CliArgs& args) {
     if (argc < 2) {
@@ -112,6 +160,80 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
                 std::cerr << "[ERROR] Compression level must be 1-9\n";
                 return false;
             }
+        } else if (arg == "--exclude") {
+            if (++i >= argc) {
+                std::cerr << "[ERROR] Missing value for " << arg << '\n';
+                return false;
+            }
+            args.filterOptions.excludePatterns.push_back(argv[i]);
+        } else if (arg == "--include-ext") {
+            if (++i >= argc) {
+                std::cerr << "[ERROR] Missing value for " << arg << '\n';
+                return false;
+            }
+            args.filterOptions.includeExtensions.push_back(normalizeExtension(argv[i]));
+        } else if (arg == "--min-size") {
+            if (++i >= argc) {
+                std::cerr << "[ERROR] Missing value for " << arg << '\n';
+                return false;
+            }
+            uint64_t value = 0;
+            if (!parseUnsigned(argv[i], value)) {
+                std::cerr << "[ERROR] --min-size must be a non-negative integer\n";
+                return false;
+            }
+            args.filterOptions.minFileSize = value;
+        } else if (arg == "--max-size") {
+            if (++i >= argc) {
+                std::cerr << "[ERROR] Missing value for " << arg << '\n';
+                return false;
+            }
+            uint64_t value = 0;
+            if (!parseUnsigned(argv[i], value)) {
+                std::cerr << "[ERROR] --max-size must be a non-negative integer\n";
+                return false;
+            }
+            args.filterOptions.maxFileSize = value;
+        } else if (arg == "--modified-after") {
+            if (++i >= argc) {
+                std::cerr << "[ERROR] Missing value for " << arg << '\n';
+                return false;
+            }
+            time_t value = 0;
+            if (!parseTimeValue(argv[i], value)) {
+                std::cerr << "[ERROR] --modified-after must be a Unix timestamp\n";
+                return false;
+            }
+            args.filterOptions.hasMinModifyTime = true;
+            args.filterOptions.minModifyTime = value;
+        } else if (arg == "--modified-before") {
+            if (++i >= argc) {
+                std::cerr << "[ERROR] Missing value for " << arg << '\n';
+                return false;
+            }
+            time_t value = 0;
+            if (!parseTimeValue(argv[i], value)) {
+                std::cerr << "[ERROR] --modified-before must be a Unix timestamp\n";
+                return false;
+            }
+            args.filterOptions.hasMaxModifyTime = true;
+            args.filterOptions.maxModifyTime = value;
+        } else if (arg == "--owner") {
+            if (++i >= argc) {
+                std::cerr << "[ERROR] Missing value for " << arg << '\n';
+                return false;
+            }
+            uint64_t value = 0;
+            if (!parseUnsigned(argv[i], value) || value > std::numeric_limits<uid_t>::max()) {
+                std::cerr << "[ERROR] --owner must be a numeric UID\n";
+                return false;
+            }
+            args.filterOptions.hasOwnerId = true;
+            args.filterOptions.ownerId = static_cast<uid_t>(value);
+        } else if (arg == "--exclude-hidden") {
+            args.filterOptions.includeHidden = false;
+        } else if (arg == "--exclude-dirs") {
+            args.filterOptions.includeDirectories = false;
         } else if (arg == "--help" || arg == "-h") {
             return false;
         } else {
@@ -131,6 +253,15 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
 
     if ((args.command == "backup" || args.command == "watch") && args.encrypt && args.password.empty()) {
         std::cerr << "[ERROR] Password is required when encryption is enabled (--password)\n";
+        return false;
+    }
+    if (args.filterOptions.minFileSize > args.filterOptions.maxFileSize) {
+        std::cerr << "[ERROR] --min-size cannot be greater than --max-size\n";
+        return false;
+    }
+    if (args.filterOptions.hasMinModifyTime && args.filterOptions.hasMaxModifyTime &&
+        args.filterOptions.minModifyTime > args.filterOptions.maxModifyTime) {
+        std::cerr << "[ERROR] --modified-after cannot be later than --modified-before\n";
         return false;
     }
 
@@ -189,7 +320,7 @@ int runBackup(const CliArgs& args) {
     backup::BackupEngine engine;
     backup::ArchiveWriterImpl writer;
 
-    if (!engine.backupDirectory(sourceRoot, archivePath, writer, config)) {
+    if (!engine.backupDirectory(sourceRoot, archivePath, writer, config, args.filterOptions)) {
         std::cerr << "[ERROR] Backup failed: " << engine.lastError() << '\n';
         return 1;
     }
@@ -241,7 +372,7 @@ int runWatch(const CliArgs& args) {
         lastBackupTime = now;
         std::cout << "[INFO] Detected file change, triggering backup..." << std::endl;
         backup::ArchiveWriterImpl writer;
-        if (!engine->backupDirectory(sourceRoot, archivePath, writer, config)) {
+        if (!engine->backupDirectory(sourceRoot, archivePath, writer, config, args.filterOptions)) {
             std::cerr << "[ERROR] Incremental backup failed: " << engine->lastError() << '\n';
             return;
         }

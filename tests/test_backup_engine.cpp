@@ -17,6 +17,7 @@
 #include <iterator>
 #include <string>
 
+#include <utime.h>
 #include <unistd.h>
 
 namespace backup {
@@ -49,6 +50,13 @@ void writeTextFile(const std::filesystem::path& path, const std::string& content
     std::filesystem::create_directories(path.parent_path());
     std::ofstream out(path, std::ios::binary);
     out << contents;
+}
+
+void setFileTimes(const std::filesystem::path& path, time_t timestamp) {
+    struct utimbuf times {};
+    times.actime = timestamp;
+    times.modtime = timestamp;
+    ASSERT_EQ(::utime(path.c_str(), &times), 0);
 }
 
 std::string readTextFile(const std::filesystem::path& path) {
@@ -156,6 +164,39 @@ TEST(BackupEngineTest, BackupRespectsFilterOptions) {
     EXPECT_EQ(readTextFile(restored / "nested" / "keep.md"), "nested keep");
     EXPECT_FALSE(std::filesystem::exists(restored / "skip.log"));
     EXPECT_FALSE(std::filesystem::exists(restored / ".hidden.txt"));
+}
+
+TEST(BackupEngineTest, BackupRespectsTimeAndOwnerFilters) {
+    TempDir temp("engine_time_owner_filter");
+    const auto source = temp.path() / "source";
+    const auto archive = temp.path() / "filtered_time_owner.dbak";
+    const auto restored = temp.path() / "restored";
+    writeTextFile(source / "old.txt", "old");
+    writeTextFile(source / "new.txt", "new");
+    setFileTimes(source / "old.txt", 1000);
+    setFileTimes(source / "new.txt", 3000);
+
+    FilterOptions filter;
+    filter.hasMinModifyTime = true;
+    filter.minModifyTime = 2000;
+    filter.hasOwnerId = true;
+    filter.ownerId = static_cast<uid_t>(::getuid());
+
+    BackupConfig config;
+    BackupEngine engine;
+    ArchiveWriterImpl writer;
+    ASSERT_TRUE(engine.backupDirectory(source, archive, writer, config, filter))
+        << engine.lastError();
+
+    EXPECT_EQ(engine.stats().filesProcessed, 1);
+
+    ArchiveReaderImpl reader;
+    ASSERT_TRUE(engine.restoreArchive(archive, reader, restored, config))
+        << engine.lastError();
+
+    EXPECT_FALSE(std::filesystem::exists(restored / "old.txt"));
+    ASSERT_TRUE(std::filesystem::exists(restored / "new.txt"));
+    EXPECT_EQ(readTextFile(restored / "new.txt"), "new");
 }
 
 TEST(BackupEngineTest, BackupFailsForMissingSource) {
