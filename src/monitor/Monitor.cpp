@@ -6,8 +6,10 @@
 #include <fstream>
 #include <iostream>
 #include <system_error>
+#include <thread>
 #include <vector>
 #include <filesystem>
+#include <utility>
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -55,6 +57,7 @@ bool daemonizeProcess(const std::string& logFilePath) {
         if (logFile != nullptr) {
             dup2(fileno(logFile), STDOUT_FILENO);
             dup2(fileno(logFile), STDERR_FILENO);
+            std::fclose(logFile);
         }
     }
 
@@ -77,6 +80,8 @@ Monitor::~Monitor() {
 }
 
 bool Monitor::start(const MonitorConfig& config, std::shared_ptr<IFileEventListener> listener) {
+    lastError_.clear();
+
     if (!listener) {
         lastError_ = "listener must not be null";
         return false;
@@ -96,6 +101,7 @@ bool Monitor::start(const MonitorConfig& config, std::shared_ptr<IFileEventListe
     }
 
     std::filesystem::path watchRoot = std::filesystem::absolute(config_.watchPath);
+    config_.watchPath = watchRoot.string();
     std::error_code ec;
     if (!std::filesystem::exists(watchRoot, ec) || ec) {
         lastError_ = "watch path does not exist: " + watchRoot.string();
@@ -127,6 +133,7 @@ bool Monitor::start(const MonitorConfig& config, std::shared_ptr<IFileEventListe
     }
 
     if (!initializeWatcher(watchRoot)) {
+        removePidFile();
         return false;
     }
 
@@ -164,13 +171,9 @@ bool Monitor::isRunning() const {
     return running_.load();
 }
 
-<<<<<<< HEAD
 const std::string& Monitor::lastError() const {
     return lastError_;
 }
-
-=======
->>>>>>> f897a96cd93606f462554c4f69ec4df582afc300
 bool Monitor::addWatch(const std::filesystem::path& path) {
 #ifdef __linux__
     int wd = ::inotify_add_watch(watchFd_, path.c_str(),
@@ -191,7 +194,7 @@ bool Monitor::addWatch(const std::filesystem::path& path) {
 
 bool Monitor::initializeWatcher(const std::filesystem::path& rootPath) {
 #ifdef __linux__
-    watchFd_ = ::inotify_init1(IN_CLOEXEC);
+    watchFd_ = ::inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
     if (watchFd_ < 0) {
         lastError_ = std::string("inotify_init1 failed: ") + std::strerror(errno);
         return false;
@@ -248,6 +251,10 @@ void Monitor::watchLoop() {
         ssize_t length = ::read(watchFd_, buffer.data(), static_cast<int>(buffer.size()));
         if (length < 0) {
             if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;
             }
             break;
@@ -402,7 +409,6 @@ void Monitor::processEvent(uint32_t mask, const std::filesystem::path& path, boo
         return;
     }
 
-<<<<<<< HEAD
     const std::filesystem::path absolutePath = std::filesystem::absolute(path);
     FileEvent event;
     event.filePath = absolutePath.string();
@@ -410,22 +416,15 @@ void Monitor::processEvent(uint32_t mask, const std::filesystem::path& path, boo
     event.isDirectory = isDirectory;
     event.timestamp = static_cast<uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
     const std::string normalizedPath = absolutePath.string();
-=======
-    FileEvent event;
-    event.filePath = path.string();
-    event.type = type;
-    event.isDirectory = isDirectory;
-    event.timestamp = static_cast<uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
-    const std::string normalizedPath = std::filesystem::absolute(path).string();
->>>>>>> f897a96cd93606f462554c4f69ec4df582afc300
+    const std::string debounceKey = normalizedPath + "|" + std::to_string(static_cast<int>(type));
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto it = lastEventTime_.find(normalizedPath);
+        auto it = lastEventTime_.find(debounceKey);
         if (it != lastEventTime_.end() && now - it->second < std::chrono::milliseconds(100)) {
             return;
         }
-        lastEventTime_[normalizedPath] = now;
+        lastEventTime_[debounceKey] = now;
     }
 
     listener_->onFileEvent(event);

@@ -112,10 +112,11 @@ tests/
 ├── test_stream_compressor.cpp    # StreamCompressor 测试（17 用例）
 ├── test_stream_encryptor.cpp     # StreamEncryptor 测试（14 用例）
 ├── test_key_derivation.cpp       # KeyDerivation 测试（16 用例）
-└── test_stream_packer.cpp        # StreamPacker 测试（22 用例）
+├── test_stream_packer.cpp        # StreamPacker 测试（22 用例）
+└── MonitorTests.cpp              # Monitor inotify 集成测试（4 个自定义检查）
 ```
 
-所有测试文件始终编译，不再需要条件编译——压缩和加密均使用纯 C++ 手工实现，无外部依赖。当前包含 120 个 gtest 用例，另有 1 个 CTest CLI 冒烟测试（`databackup_cli_help`）。
+所有测试文件始终编译，不再需要条件编译——压缩和加密均使用纯 C++ 手工实现，无外部依赖。当前包含 120 个 gtest 用例，另有 2 个 CTest 测试目标（`databackup_cli_help`、`MonitorTests`）。
 
 ---
 
@@ -135,12 +136,12 @@ tests/
 | StreamPacker | `test_stream_packer.cpp` | 22 | 打包/解包往返、多文件/目录混合、二进制保真、空/大文件、不完整头部、状态重置、移动语义、元数据往返 |
 | KeyDerivation | `test_key_derivation.cpp` | 16 | 迭代密钥派生（正确大小、确定性、差异输入）、随机字节生成、`secureClear` 安全清零、集成流程 |
 | CLI help | `tests/CMakeLists.txt` / CTest | 1 | `databackup --help` 返回成功并输出 Usage |
+| Monitor | `MonitorTests.cpp` / CTest | 4 | 空 listener 拒绝、非法路径拒绝、重复启动拒绝、Linux inotify 创建事件回调 |
 
 ### 未覆盖范围
 
 | 模块 | 原因 |
 |---|---|
-| `IMonitor` / inotify | 当前只有接口头文件，尚无 `src/monitor` 具体实现；后续实现后需要内核事件和 Daemon 环境测试 |
 | CLI backup/restore 参数矩阵 | 当前只有 `--help` 冒烟测试；完整 CLI 备份/恢复组合仍建议补 CTest 或脚本级集成测试 |
 
 ---
@@ -171,7 +172,8 @@ CMakeLists.txt (根)
         ├── add_executable(databackup_tests)    ← 测试可执行文件
         ├── target_link_libraries(... gtest_main gtest databackup_lib)
         ├── gtest_discover_tests(...)            ← 自动注册 gtest 用例到 CTest
-        └── add_test(databackup_cli_help ...)    ← 注册 CLI 冒烟测试
+        ├── add_test(databackup_cli_help ...)    ← 注册 CLI 冒烟测试
+        └── add_test(MonitorTests ...)           ← 注册 Monitor 集成测试
 ```
 
 ### 静态库复用
@@ -196,7 +198,8 @@ libdatabackup_lib.a
                ├── test_stream_compressor.cpp
                ├── test_stream_encryptor.cpp
                ├── test_key_derivation.cpp
-               └── test_stream_packer.cpp
+               ├── test_stream_packer.cpp
+               └── MonitorTests.cpp
 ```
 
 ---
@@ -259,3 +262,4 @@ ctest --output-on-failure
 | 2026-07-14 | 重构为纯 C++ 手工后端（RLE/RC4/迭代KDF），移除 zlib/OpenSSL 依赖 |
 | 2026-07-15 | 新增 StreamPacker 测试 (22 用例)，总计 103 测试 |
 | 2026-07-15 | 新增核心文件系统、归档实现、BackupEngine 集成测试和 CLI help 冒烟测试；总计 120 个 gtest 用例 + 1 个 CTest CLI 测试 |
+| 2026-07-16 | 接入 Monitor 集成测试目标，CTest 总计 123 个测试条目 |

@@ -28,7 +28,6 @@ endif()
 add_executable(databackup "${PROJECT_SOURCE_DIR}/src/main.cpp")
 target_link_libraries(databackup PRIVATE databackup_lib)
 
-<<<<<<< HEAD
 # 开启严格警告
 if(MSVC)
     target_compile_options(databackup PRIVATE /W4)
@@ -39,21 +38,3 @@ endif()
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
-=======
-# 测试执行文件
-add_executable(monitor_tests
-    tests/MonitorTests.cpp
-    src/monitor/Monitor.cpp
-)
-
-if (MSVC)
-    target_compile_options(databackup PRIVATE /W4)
-    target_compile_options(monitor_tests PRIVATE /W4)
-else()
-    target_compile_options(databackup PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(monitor_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-enable_testing()
-add_test(NAME MonitorTests COMMAND monitor_tests)
->>>>>>> f897a96cd93606f462554c4f69ec4df582afc300

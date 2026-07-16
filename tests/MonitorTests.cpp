@@ -10,6 +10,17 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <unistd.h>
+
+namespace {
+
+std::filesystem::path makeUniqueTempDir() {
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+           ("databackup-monitor-" + std::to_string(::getpid()) + "-" + std::to_string(stamp));
+}
+
+} // namespace
 
 class TestListener : public backup::IFileEventListener {
 public:
@@ -58,19 +69,23 @@ static bool testStartWithInvalidPath() {
 }
 
 static bool testStartTwiceFails() {
+    const std::filesystem::path tempDir = makeUniqueTempDir();
+    EXPECT_TRUE(std::filesystem::create_directories(tempDir));
+
     backup::Monitor monitor;
     auto listener = std::make_shared<TestListener>();
     backup::MonitorConfig config;
-    config.watchPath = std::filesystem::temp_directory_path().string();
+    config.watchPath = tempDir.string();
     EXPECT_TRUE(monitor.start(config, listener));
     EXPECT_FALSE(monitor.start(config, listener));
     monitor.stop();
+    std::filesystem::remove_all(tempDir);
     return true;
 }
 
 static bool testMonitorReceivesCreateEvent() {
 #ifdef __linux__
-    const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / std::filesystem::unique_path("databackup-monitor-%%%%-%%%%");
+    const std::filesystem::path tempDir = makeUniqueTempDir();
     EXPECT_TRUE(std::filesystem::create_directories(tempDir));
 
     backup::Monitor monitor;

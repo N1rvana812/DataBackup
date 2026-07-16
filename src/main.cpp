@@ -257,7 +257,14 @@ int runWatch(const CliArgs& args) {
     backup::MonitorConfig monitorConfig;
     monitorConfig.watchPath = sourceRoot.string();
     monitorConfig.runAsDaemon = args.daemon;
-    monitorConfig.logFilePath = args.daemon ? std::string{} : std::string{};
+    if (args.daemon) {
+        std::filesystem::path monitorDir = archivePath.parent_path();
+        if (monitorDir.empty()) {
+            monitorDir = std::filesystem::current_path();
+        }
+        monitorConfig.pidFilePath = (monitorDir / "databackup-watch.pid").string();
+        monitorConfig.logFilePath = (monitorDir / "databackup-watch.log").string();
+    }
 
     if (!monitor.start(monitorConfig, engine)) {
         std::cerr << "[ERROR] Failed to start monitor: " << monitor.lastError() << '\n';

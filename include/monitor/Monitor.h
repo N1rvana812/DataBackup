@@ -21,10 +21,7 @@ public:
     bool start(const MonitorConfig& config, std::shared_ptr<IFileEventListener> listener) override;
     void stop() override;
     bool isRunning() const override;
-<<<<<<< HEAD
     const std::string& lastError() const;
-=======
->>>>>>> f897a96cd93606f462554c4f69ec4df582afc300
 
 private:
     bool addWatch(const std::filesystem::path& path);
